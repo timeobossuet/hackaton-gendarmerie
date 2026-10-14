@@ -1,19 +1,4 @@
 // Configuration visuelle et cartographique de l'interface AERIS.
-export const droneClasses = {
-  type1: {
-    name: 'Type 1',
-    description: 'Longue portée',
-    color: '#101e30',
-    icon: '●'
-  },
-  type2: {
-    name: 'Type 2',
-    description: 'Zone rapprochée',
-    color: '#d78345',
-    icon: '◆'
-  }
-};
-
 export const MAP_CONFIG = {
   defaultZoomSensitivity: 0.15,
   minZoomSensitivity: 0.05,

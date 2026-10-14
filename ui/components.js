@@ -1,4 +1,4 @@
-import { droneClasses, MAP_CONFIG } from './config.js';
+import { MAP_CONFIG } from './config.js';
 import { state } from './state.js';
 import { componentIcon } from './icons.js';
 
@@ -54,50 +54,81 @@ function leftPanelComponent() {
     <div class="space-y-5">
       <section>
         <div class="mb-2 flex items-center justify-between">
-          <h2 class="text-xs font-semibold">Zone de mission</h2>
-          <span class="rounded bg-notion-100 px-1.5 py-0.5 text-[10px] text-notion-500">${state.polygonAdded ? 'Ajoutée' : 'À définir'}</span>
+          <h2 class="text-xs font-semibold">Chemin à protéger</h2>
+          <span class="rounded bg-notion-100 px-1.5 py-0.5 text-[10px] text-notion-500">${state.planning.gpxFileName || 'À importer'}</span>
         </div>
-        <p class="text-xs leading-5 text-notion-500">Ajoutez un polygone sur la carte pour délimiter votre zone d’intervention.</p>
-        <button id="add-zone" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-notion-400 px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
-          ${componentIcon(state.drawingPolygon || state.polygonAdded ? 'map' : 'plus', 'h-4 w-4')} ${state.drawingPolygon ? 'Cliquez sur la carte pour dessiner' : (state.polygonAdded ? 'Modifier le polygone' : 'Ajouter un polygone')}
+        <p class="text-xs leading-5 text-notion-500">Importez le GPX du chemin à protéger. La carte se centrera automatiquement dessus.</p>
+        <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml" class="hidden" />
+        <button id="import-gpx" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-notion-400 px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
+          ${componentIcon('download', 'h-4 w-4')} ${state.planning.gpxFileName ? 'Remplacer le chemin GPX' : 'Importer un chemin GPX'}
         </button>
-        ${state.drawingPolygon ? `<button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-aeris px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1b716a]" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone${state.polygonPoints.length ? ` (${state.polygonPoints.length} points)` : ''}</button>` : ''}
+        ${state.planning.gpxFileName ? `<div class="mt-2 rounded-md bg-notion-50 px-2.5 py-2 text-[10px] text-notion-500">Tracé orange chargé sur la carte.</div>` : ''}
+      </section>
+      <section class="border-t border-notion-200 pt-4">
+        <h2 class="mb-2 text-xs font-semibold">Zone à protéger</h2>
+        <div class="grid grid-cols-2 gap-1 rounded-md bg-notion-100 p-1 text-[10px]">
+          <button id="area-buffer" type="button" class="rounded px-2 py-1.5 ${state.planning.areaMode === 'buffer' ? 'bg-white font-semibold shadow-sm' : 'text-notion-500'}">Autour du chemin</button>
+          <button id="area-polygon" type="button" class="rounded px-2 py-1.5 ${state.planning.areaMode === 'polygon' ? 'bg-white font-semibold shadow-sm' : 'text-notion-500'}">Polygone manuel</button>
+        </div>
+        ${state.planning.areaMode === 'buffer' ? `
+          <label class="mt-3 block text-[10px] text-notion-500">Distance du buffer <span id="buffer-value" class="font-semibold text-aeris">${state.planning.bufferMeters} m</span>
+            <input id="buffer-slider" type="range" min="50" max="1000" step="50" value="${state.planning.bufferMeters}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
+          </label>
+        ` : `
+          <button id="add-zone" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-notion-400 px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
+            ${componentIcon('map', 'h-4 w-4')} ${state.drawingPolygon ? 'Cliquez sur la carte pour dessiner' : (state.polygonAdded ? 'Modifier le polygone' : 'Tracer un polygone')}
+          </button>
+          ${state.drawingPolygon ? `<button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-aeris px-3 py-2 text-xs font-semibold text-white" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone (${state.polygonPoints.length} points)</button>` : ''}
+        `}
       </section>
       <section class="border-t border-notion-200 pt-4">
         <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-xs font-semibold">Objectif de couverture</h2>
-          <span id="coverage-value" class="text-xs font-semibold text-aeris">${state.coverage}%</span>
+          <h2 class="text-xs font-semibold">Placement des drones</h2>
+          <span class="text-[10px] text-notion-400">${Number(state.planning.smallDrones) + Number(state.planning.largeDrones)} drones</span>
         </div>
-        <input id="coverage-slider" type="range" min="0" max="100" value="${state.coverage}" class="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
-        <div class="mt-1 flex justify-between text-[10px] text-notion-400"><span>0%</span><span>100%</span></div>
-      </section>
-
-      <section class="border-t border-notion-200 pt-4">
-        <div class="mb-3 flex items-center justify-between">
-          <h2 class="text-xs font-semibold">Flotte disponible</h2>
-          <span class="text-[10px] text-notion-400">4 drones</span>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 1 km
+            <input id="small-drones" type="number" min="0" max="30" value="${state.planning.smallDrones}" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
+          </label>
+          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 2 km
+            <input id="large-drones" type="number" min="0" max="30" value="${state.planning.largeDrones}" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
+          </label>
         </div>
-        ${droneControlComponent('type1', state.type1Count)}
-        ${droneControlComponent('type2', state.type2Count)}
+        <label class="mt-3 block text-[10px] text-notion-500">Importance du chemin dans la couverture <span id="path-weight-value" class="font-semibold text-aeris">${state.planning.pathWeight}</span>
+          <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
+        </label>
+        <p class="mt-1 text-[10px] leading-4 text-notion-400">Plus la valeur est élevée, plus l’algorithme favorise le tracé par rapport au reste de la zone.</p>
+        <label class="mt-3 block text-[10px] text-notion-500">Importance de la zone à protéger <span id="area-weight-value" class="font-semibold text-aeris">${state.planning.areaWeight}</span>
+          <input id="area-weight" type="range" min="1" max="100" step="1" value="${state.planning.areaWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
+        </label>
+        <p class="mt-1 text-[10px] leading-4 text-notion-400">Une valeur élevée favorise une couverture homogène de toute la zone, au lieu de concentrer les drones sur le chemin.</p>
+        <div class="mt-3 grid grid-cols-2 gap-2">
+          <button id="optimize-placement" type="button" class="rounded-md bg-aeris px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-[#1b716a]" ${state.planning.calculating ? 'disabled' : ''}>${state.planning.calculating ? 'Calcul en cours…' : 'Optimiser le placement'}</button>
+        </div>
+        ${placementResultComponent()}
       </section>
+      <button id="restart-mission" type="button" class="w-full rounded-md border border-red-200 px-3 py-2 text-[10px] font-semibold text-red-600 transition hover:bg-red-50">Recommencer la mission</button>
     </div>
   `;
 
   return panelFrame({ side: 'left', eyebrow: 'Configuration', title: 'Préparer la mission', content, open: state.leftMenuOpen });
 }
 
-function droneControlComponent(type, count) {
-  const drone = droneClasses[type];
+function placementResultComponent() {
+  if (state.planning.placementError) {
+    return `<div class="mt-3 rounded-md bg-red-50 px-2.5 py-2 text-[10px] leading-4 text-red-600">${state.planning.placementError}</div>`;
+  }
+  const result = state.planning.placement;
+  if (!result) return `<p class="mt-3 text-[10px] leading-4 text-notion-400">Importez un chemin puis lancez l’optimisation pour afficher les zones de couverture.</p>`;
+  const percent = (value) => value == null ? '—' : `${Math.round(value * 100)}%`;
   return `
-    <div class="mb-3 rounded-md border border-notion-200 p-3 last:mb-0">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="grid h-7 w-7 place-items-center rounded-md text-xs" style="color:${drone.color};background:${drone.color}18">${drone.icon}</span>
-          <div><div class="text-xs font-semibold">${drone.name}</div><div class="text-[10px] text-notion-500">${drone.description}</div></div>
-        </div>
-        <span class="text-xs font-medium text-notion-500">${count}</span>
+    <div class="mt-3 rounded-md bg-notion-50 p-2.5 text-[10px] leading-4 text-notion-600">
+      <div class="grid grid-cols-2 gap-1">
+        <span>Couverture</span><strong class="text-right text-aeris">${percent(result.stats.weighted)}</strong>
+        <span>Chemin</span><strong class="text-right">${percent(result.stats.path)}</strong>
+        <span>Zone</span><strong class="text-right">${percent(result.stats.buffer ?? result.stats.poly)}</strong>
+        <span>Collisions</span><strong class="text-right">${result.collisions.pairs}</strong>
       </div>
-      <input data-drone-type="${type}" type="range" min="0" max="8" value="${count}" class="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200" style="accent-color:${drone.color}" />
     </div>
   `;
 }
@@ -115,10 +146,10 @@ function rightPanelComponent() {
       </section>
       <section class="border-t border-notion-200 pt-4">
         <h2 class="mb-3 text-xs font-semibold">Analyse météo</h2>
-        <p class="text-[10px] leading-4 text-notion-500">Recherchez une ville depuis la barre située en haut de la carte.</p>
+        <p class="text-[10px] leading-4 text-notion-500">La météo est calculée sur la zone à protéger autour du chemin.</p>
         <div class="mt-3 grid grid-cols-2 gap-2">
-          <label class="text-[10px] text-notion-500">Rayon (km)<input id="weather-radius" type="number" value="${state.weather.radiusKm}" min="2" max="50" step="1" class="mt-1 w-full rounded-md border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" /></label>
           <label class="text-[10px] text-notion-500">Grille<input id="weather-grid-size" type="number" value="${state.weather.gridSize}" min="2" max="15" step="1" class="mt-1 w-full rounded-md border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" /></label>
+          <button id="weather-scan" type="button" class="self-end rounded-md bg-aeris px-2 py-1.5 text-[10px] font-semibold text-white">Analyser</button>
         </div>
         <div id="weather-status" class="mt-3 ${state.weather.error || state.weather.scanning ? '' : 'hidden'} rounded-md bg-notion-100 px-2.5 py-2 text-[10px] leading-4 ${state.weather.error ? 'text-red-600' : 'text-notion-500'}">
           ${state.weather.error || (state.weather.scanning ? `Scan météo en cours... ${state.weather.progress}%` : '')}
@@ -139,10 +170,9 @@ function rightPanelComponent() {
 function mapComponent() {
   return `
     <div id="map" class="relative h-full w-full select-none overflow-hidden bg-[#dfe9d8]">
-      ${weatherSearchComponent()}
       <div id="map-hint" class="pointer-events-none absolute left-1/2 top-1/2 z-[1] hidden -translate-x-1/2 -translate-y-1/2 rounded-lg border border-aeris/30 bg-white/95 px-4 py-3 text-center shadow-panel">
-        <div class="text-xs font-semibold text-notion-900">${state.drawingPolygon ? 'Dessinez votre zone' : 'Zone de mission ajoutée'}</div>
-        <div class="mt-1 text-[10px] text-notion-500">${state.drawingPolygon ? 'Cliquez sur la carte pour ajouter des points' : 'La carte est centrée sur le polygone'}</div>
+        <div class="text-xs font-semibold text-notion-900">${state.drawingPolygon ? 'Dessinez votre zone' : (state.planning.gpxGeoJson ? 'Chemin chargé' : 'Zone à définir')}</div>
+        <div class="mt-1 text-[10px] text-notion-500">${state.drawingPolygon ? 'Cliquez sur la carte pour ajouter des points' : (state.planning.gpxGeoJson ? 'La carte est centrée sur le chemin' : 'Importez un chemin GPX')}</div>
       </div>
       <div class="pointer-events-auto absolute bottom-5 right-5 z-[1001] flex items-end gap-2">
         ${zoomSettingsComponent()}
@@ -156,18 +186,6 @@ function mapComponent() {
   `;
 }
 
-function weatherSearchComponent() {
-  return `
-    <div class="pointer-events-auto absolute left-1/2 top-4 z-[2100] w-[calc(100vw-2rem)] max-w-[320px] -translate-x-1/2">
-      <div class="flex items-center gap-2 rounded-lg border border-notion-200 bg-white/95 p-1.5 shadow-panel backdrop-blur">
-        <label for="weather-location" class="sr-only">Ville ou code postal</label>
-        <input id="weather-location" type="search" placeholder="Rechercher une ville ou un code postal..." autocomplete="off" class="min-w-0 flex-1 rounded-md border-0 bg-transparent px-3 py-2 text-xs text-notion-900 outline-none placeholder:text-notion-400 focus:ring-0" />
-        <button id="weather-scan" type="button" class="shrink-0 rounded-md bg-aeris px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#1b716a]">Scanner</button>
-      </div>
-      <div id="weather-status" class="mx-auto mt-2 hidden w-fit max-w-full rounded-md border border-notion-200 bg-white/95 px-3 py-2 text-center text-[10px] leading-4 text-notion-500 shadow-panel backdrop-blur"></div>
-    </div>
-  `;
-}
 
 function zoomSettingsComponent() {
   return `

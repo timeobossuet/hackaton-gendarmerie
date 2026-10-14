@@ -8,6 +8,7 @@
     <title>AERIS — Carte de mission</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -60,6 +61,7 @@
 <body class="overflow-hidden bg-notion-50 font-sans text-notion-900 antialiased">
     <div id="app" class="relative h-screen w-screen overflow-hidden"></div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="src/drones.js"></script>
     <!-- Point d'entrée de l'interface graphique AERIS. -->
     <script type="module" src="ui/app.js"></script>
 </body>

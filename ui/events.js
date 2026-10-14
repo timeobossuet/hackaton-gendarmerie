@@ -1,6 +1,6 @@
 import { MAP_CONFIG, SELECTORS } from './config.js';
 import { state } from './state.js';
-import { $, $$ } from './dom.js';
+import { $ } from './dom.js';
 import {
   bindMapDrawing,
   bindMapInteractions,
@@ -10,14 +10,20 @@ import {
   zoomBy
 } from './map.js';
 import {
+  cancelWeatherScan,
   initializeWeatherLayer,
   scanWeather,
   setWeatherVisibility
 } from './weather/scanner.js';
+import { parseGpx } from './planning/gpx.js';
+import { fitMapToGpx, renderPlanningArea } from './planning/area.js';
+import { calculatePlacement, clearPlacement } from './planning/placement.js';
+import { getLeafletMap } from './map.js';
 
 export function bindEvents({ render }) {
   initializeMap();
   bindMapInteractions();
+  renderPlanningArea();
   initializeWeatherLayer();
   setWeatherVisibility(state.weatherVisible);
 
@@ -25,7 +31,20 @@ export function bindEvents({ render }) {
     state.leftMenuOpen = !state.leftMenuOpen;
     render();
   });
-  $('#add-zone').addEventListener('click', () => {
+  $('#import-gpx').addEventListener('click', () => $('#gpx-file').click());
+  $('#gpx-file').addEventListener('change', (event) => loadGpx(event, render));
+  $('#area-buffer')?.addEventListener('click', () => {
+    state.planning.areaMode = 'buffer';
+    state.drawingPolygon = false;
+    renderPlanningArea();
+    render();
+  });
+  $('#area-polygon')?.addEventListener('click', () => {
+    state.planning.areaMode = 'polygon';
+    render();
+  });
+  $('#buffer-slider')?.addEventListener('input', updateBuffer);
+  $('#add-zone')?.addEventListener('click', () => {
     state.drawingPolygon = true;
     state.polygonPoints = [];
     state.polygonAdded = false;
@@ -34,8 +53,12 @@ export function bindEvents({ render }) {
     bindMapDrawing();
   });
   $(SELECTORS.finishZone)?.addEventListener('click', () => finishPolygon(render));
-  $('#coverage-slider').addEventListener('input', updateCoverage);
-  $$('[data-drone-type]').forEach((slider) => slider.addEventListener('input', updateDroneCount));
+  $('#small-drones').addEventListener('input', updateDroneOptions);
+  $('#large-drones').addEventListener('input', updateDroneOptions);
+  $('#path-weight').addEventListener('input', updatePlacementWeight);
+  $('#area-weight').addEventListener('input', updatePlacementWeight);
+  $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
+  $('#restart-mission').addEventListener('click', () => restartMission(render));
   $('#weather-toggle').addEventListener('click', () => {
     state.weatherVisible = !state.weatherVisible;
     setWeatherVisibility(state.weatherVisible);
@@ -47,9 +70,6 @@ export function bindEvents({ render }) {
   $('#zoom-settings').addEventListener('click', () => toggleZoomSettings(render));
   $('#zoom-sensitivity')?.addEventListener('input', updateZoomSensitivity);
   $('#weather-scan').addEventListener('click', scanFromControls);
-  $('#weather-location').addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') scanFromControls();
-  });
 }
 
 function toggleZoomSettings(render) {
@@ -62,39 +82,114 @@ function updateZoomSensitivity(event) {
   $('#zoom-sensitivity-value').textContent = `${event.target.value}%`;
 }
 
-function updateCoverage(event) {
-  state.coverage = event.target.value;
-  $('#coverage-value').textContent = `${state.coverage}%`;
+function updateBuffer(event) {
+  state.planning.bufferMeters = Number(event.target.value);
+  $('#buffer-value').textContent = `${state.planning.bufferMeters} m`;
+  renderPlanningArea();
 }
 
-function updateDroneCount(event) {
-  const type = event.target.dataset.droneType;
-  state[`${type}Count`] = event.target.value;
-  event.target.closest('.rounded-md').querySelector('.text-notion-500').textContent = event.target.value;
+function updateDroneOptions(event) {
+  state.planning[event.target.id === 'small-drones' ? 'smallDrones' : 'largeDrones'] = Math.max(0, Math.min(30, Number(event.target.value) || 0));
+}
+
+function updatePlacementWeight(event) {
+  const key = event.target.id === 'path-weight' ? 'pathWeight' : 'areaWeight';
+  state.planning[key] = Number(event.target.value);
+  $(`#${key.replace('Weight', '-weight-value')}`).textContent = event.target.value;
+}
+
+async function optimizePlacement(render) {
+  state.planning.calculating = true;
+  state.planning.placementError = null;
+  render();
+  await new Promise((resolve) => window.setTimeout(resolve, 30));
+  try {
+    calculatePlacement();
+  } catch (error) {
+    state.planning.placementError = error.message;
+  } finally {
+    state.planning.calculating = false;
+    render();
+  }
+}
+
+function restartMission(render) {
+  cancelWeatherScan();
+  clearPlacement();
+  state.polygonAdded = false;
+  state.drawingPolygon = false;
+  state.polygonPoints = [];
+  state.planning = {
+    areaMode: 'buffer',
+    bufferMeters: 200,
+    gpxFileName: null,
+    gpxGeoJson: null,
+    smallDrones: 3,
+    largeDrones: 2,
+    pathWeight: 10,
+    areaWeight: 1,
+    calculating: false,
+    placement: null,
+    placementError: null
+  };
+  state.weather = {
+    gridSize: 5,
+    scanning: false,
+    progress: 0,
+    location: null,
+    error: null,
+    cells: []
+  };
+  const map = getLeafletMap();
+  map?.setView(MAP_CONFIG.defaultCenter, MAP_CONFIG.defaultZoom);
+  renderMissionPolygon();
+  renderPlanningArea();
+  render();
 }
 
 async function scanFromControls() {
-  const query = $('#weather-location').value.trim();
-  if (!query) {
-    showWeatherStatus('Saisissez une ville ou un code postal.', true);
-    return;
-  }
-
-  const radius = Number($('#weather-radius').value) || 8;
   const gridSize = Number($('#weather-grid-size').value) || 5;
   state.weather.scanning = true;
-  showWeatherStatus('Localisation en cours...');
+  showWeatherStatus('Analyse de la zone protégée en cours...');
 
   try {
-    await scanWeather(query, radius, gridSize, (progress, locationName) => {
+    await scanWeather(gridSize, (progress, locationName) => {
       showWeatherStatus(`Scan météo en cours sur ${locationName}... ${progress}%`);
     });
     state.weather.scanning = false;
-    showWeatherStatus(`Scan terminé sur ${state.weather.location.name}. Cliquez sur une cellule pour les détails.`);
+    showWeatherStatus(
+      state.weather.error
+        ? `${state.weather.error} Les autres cellules restent disponibles.`
+        : `Scan terminé sur ${state.weather.location.name}. Cliquez sur une cellule pour les détails.`,
+      Boolean(state.weather.error)
+    );
   } catch (error) {
     state.weather.scanning = false;
     state.weather.error = error.message;
     showWeatherStatus(error.message, true);
+  }
+
+}
+
+async function loadGpx(event, render) {
+  const [file] = event.target.files;
+  if (!file) return;
+  try {
+    state.planning.gpxGeoJson = parseGpx(await file.text());
+    state.planning.gpxFileName = file.name;
+    state.planning.areaMode = 'buffer';
+    state.polygonPoints = [];
+    state.polygonAdded = false;
+    state.drawingPolygon = false;
+    renderPlanningArea();
+    fitMapToGpx();
+    render();
+    showMapHint('Chemin GPX chargé');
+  } catch (error) {
+    state.planning.gpxGeoJson = null;
+    showMapHint(error.message);
+  } finally {
+    event.target.value = '';
   }
 }
 
@@ -115,6 +210,7 @@ function finishPolygon(render) {
   state.drawingPolygon = false;
   state.polygonAdded = true;
   render();
+  renderPlanningArea();
   renderMissionPolygon();
   centerMapOnPolygon();
   showMapHint('Zone de mission ajoutée');

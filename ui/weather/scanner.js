@@ -1,7 +1,8 @@
-import { fetchWeather, searchLocation } from './api.js';
+import { fetchWeather } from './api.js';
 import { weatherPopup } from './popup.js';
 import { state } from '../state.js';
 import { getLeafletMap } from '../map.js';
+import { getProtectedArea, getProtectedBounds } from '../planning/area.js';
 
 const drones = [
   { name: 'DJI Mini 5', maxWind: 38, maxRain: 0 },
@@ -11,6 +12,11 @@ const drones = [
 
 let weatherLayer = null;
 let scanVersion = 0;
+
+export function cancelWeatherScan() {
+  scanVersion += 1;
+  weatherLayer?.clearLayers();
+}
 
 export function initializeWeatherLayer() {
   weatherLayer?.remove();
@@ -26,13 +32,24 @@ export function setWeatherVisibility(visible) {
   else weatherLayer.remove();
 }
 
-export async function scanWeather(query, radiusKm, gridSize, onProgress) {
-  const location = await searchLocation(query);
+export async function scanWeather(gridSize, onProgress) {
   const map = getLeafletMap();
+  const area = getProtectedArea();
+  const bounds = getProtectedBounds();
+  if (!area || !bounds?.isValid()) throw new Error('Importez un chemin GPX ou définissez une zone à protéger.');
+  const size = Number(gridSize);
+  if (!Number.isInteger(size) || size < 2 || size > 15) {
+    throw new Error('La taille de la grille doit être comprise entre 2 et 15.');
+  }
+
   const currentScan = ++scanVersion;
+  const location = {
+    lat: bounds.getCenter().lat,
+    lng: bounds.getCenter().lng,
+    name: state.planning.gpxFileName || 'Zone à protéger'
+  };
   state.weather = {
     ...state.weather,
-    radiusKm,
     gridSize,
     location,
     scanning: true,
@@ -41,36 +58,53 @@ export async function scanWeather(query, radiusKm, gridSize, onProgress) {
     cells: []
   };
   weatherLayer?.clearLayers();
-  map.flyTo([location.lat, location.lng], radiusKm >= 30 ? 9 : radiusKm >= 15 ? 10 : radiusKm >= 8 ? 11 : 13, { duration: 1.2 });
-
-  const offset = radiusKm / 111;
-  const latMin = location.lat - offset * 0.7;
-  const latMax = location.lat + offset * 0.7;
-  const lngMin = location.lng - offset;
-  const lngMax = location.lng + offset;
+  map.fitBounds(bounds, { padding: [80, 80], maxZoom: 16 });
+  const latMin = bounds.getSouth();
+  const latMax = bounds.getNorth();
+  const lngMin = bounds.getWest();
+  const lngMax = bounds.getEast();
   const cells = [];
+  const totalCells = size * size;
+  let failedCells = 0;
 
-  for (let row = 0; row < gridSize; row += 1) {
-    for (let column = 0; column < gridSize; column += 1) {
+  for (let row = 0; row < size; row += 1) {
+    for (let column = 0; column < size; column += 1) {
       if (currentScan !== scanVersion) return;
-      const south = latMin + (row * (latMax - latMin)) / gridSize;
-      const north = latMin + ((row + 1) * (latMax - latMin)) / gridSize;
-      const west = lngMin + (column * (lngMax - lngMin)) / gridSize;
-      const east = lngMin + ((column + 1) * (lngMax - lngMin)) / gridSize;
+      const south = latMin + (row * (latMax - latMin)) / size;
+      const north = latMin + ((row + 1) * (latMax - latMin)) / size;
+      const west = lngMin + (column * (lngMax - lngMin)) / size;
+      const east = lngMin + ((column + 1) * (lngMax - lngMin)) / size;
       const lat = (south + north) / 2;
       const lng = (west + east) / 2;
-      const raw = await fetchWeather(lat, lng);
-      const weather = normalizeWeather(raw);
+      let inside = false;
+      try {
+        inside = turf.booleanPointInPolygon(turf.point([lng, lat]), area, { ignoreBoundary: false });
+      } catch {
+        failedCells += 1;
+        continue;
+      }
+      if (!inside) continue;
+      let weather;
+      try {
+        weather = normalizeWeather(await fetchWeather(lat, lng));
+      } catch {
+        failedCells += 1;
+        continue;
+      }
       cells.push({ id: `${row}-${column}`, bounds: [[south, west], [north, east]], lat, lng, weather });
       state.weather.cells = cells;
-      state.weather.progress = Math.round((cells.length / (gridSize * gridSize)) * 100);
+      state.weather.progress = Math.round(((row * size + column + 1) / totalCells) * 100);
       onProgress?.(state.weather.progress, location.name);
       renderWeatherCells();
     }
   }
 
+  if (!cells.length) throw new Error('Aucune donnée météo exploitable pour cette zone.');
   state.weather.scanning = false;
   state.weather.location = location;
+  if (failedCells > 0) {
+    state.weather.error = `${failedCells} cellule${failedCells > 1 ? 's' : ''} météo n${failedCells > 1 ? 'ont' : '’a'} pas pu être chargée${failedCells > 1 ? 's' : 'e'}.`;
+  }
   return location;
 }
 
@@ -91,11 +125,14 @@ export function renderWeatherCells() {
 }
 
 function normalizeWeather(data) {
-  const current = data.current;
-  const gust = Math.round(current.wind_gusts_10m || current.wind_speed_10m);
+  const current = data?.current;
+  const hourly = data?.hourly;
+  if (!current || !hourly?.time?.length) throw new Error('Réponse météo incomplète.');
+  const gust = Math.round(Number.isFinite(current.wind_gusts_10m) ? current.wind_gusts_10m : current.wind_speed_10m);
+  if (!Number.isFinite(gust)) throw new Error('Rafales indisponibles.');
   const rain = Number((current.precipitation || 0).toFixed(1));
   const kp = Math.min(9, Math.max(0, Math.floor(Math.random() * 4) + 1));
-  const stability = calculateStability(data.hourly, gust, rain);
+  const stability = calculateStability(hourly, gust, rain);
 
   return {
     temperature: Math.round(current.temperature_2m),
@@ -114,6 +151,9 @@ function normalizeWeather(data) {
 }
 
 function calculateStability(hourly, currentGust, currentRain) {
+  if (!hourly?.time?.length) {
+    return { text: 'Prévisions horaires indisponibles', warning: true };
+  }
   const currentHour = new Date().getHours();
   const rainy = currentRain > 0.1;
   const windy = currentGust > 38;
@@ -121,8 +161,9 @@ function calculateStability(hourly, currentGust, currentRain) {
   for (let hour = 1; hour <= 12; hour += 1) {
     const index = currentHour + hour;
     if (index >= hourly.time.length) break;
-    const futureGust = hourly.wind_gusts_10m[index];
-    const futureRain = hourly.precipitation[index];
+    const futureGust = Number(hourly.wind_gusts_10m?.[index]);
+    const futureRain = Number(hourly.precipitation?.[index]);
+    if (!Number.isFinite(futureGust) || !Number.isFinite(futureRain)) continue;
     if (!rainy && futureRain > 0.2) return { text: `Dégradation : pluie prévue dans ${hour}h`, warning: true };
     if (rainy && futureRain === 0) return { text: `Amélioration : fin de la pluie dans ${hour}h`, warning: false };
     if (!windy && futureGust > 38) return { text: `Rafales > 38 km/h prévues dans ${hour}h`, warning: true };
