@@ -1,9 +1,6 @@
-# hackaton-gendarmerie
+# Aeris - gestion d'une flotte de drones en opération
 
-## Carte 
-Pour récupérer la carte 
-https://www.openstreetmap.org/relation/1374163#map=15/43.08714/1.86789
-
+## Objectifs
 Objectif 1 : La gagne
 
 But 1 : Décider les moyens nécessaires à une mission.
