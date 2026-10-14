@@ -10,7 +10,10 @@ Ce dossier contient uniquement le code de l'interface graphique de la dashboard.
 - `dom.js` : helpers DOM partagés.
 - `events.js` : écouteurs des contrôles et transitions d'état.
 - `icons.js` : icônes SVG utilisées par les composants.
-- `map.js` : zoom, déplacement, dessin et rendu du polygone.
+- `map.js` : initialisation Leaflet, navigation et zone de mission.
+- `weather/api.js` : recherche géographique et appels Open-Meteo.
+- `weather/scanner.js` : scan de grille, couches Leaflet et progression.
+- `weather/popup.js` : contenu des détails météo et compatibilité des drones.
 - `state.js` : état local de l'interface.
 
 ## Intégration

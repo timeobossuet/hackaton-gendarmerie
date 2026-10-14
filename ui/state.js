@@ -9,12 +9,17 @@ export const state = {
   type1Count: 2,
   type2Count: 2,
   polygonAdded: false,
-  mapZoomed: false,
   drawingPolygon: false,
   polygonPoints: [],
-  mapScale: 1,
-  mapX: 0,
-  mapY: 0,
   zoomSensitivity: MAP_CONFIG.defaultZoomSensitivity,
-  zoomSettingsOpen: false
+  zoomSettingsOpen: false,
+  weather: {
+    radiusKm: 8,
+    gridSize: 5,
+    scanning: false,
+    progress: 0,
+    location: null,
+    error: null,
+    cells: []
+  }
 };
