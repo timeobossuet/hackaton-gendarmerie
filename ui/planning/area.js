@@ -11,13 +11,13 @@ export function renderPlanningArea() {
   gpxLayer?.remove();
   protectedLayer?.remove();
 
-  if (state.planning.gpxGeoJson) {
+  if (state.preparationTab !== 'zone' && state.planning.gpxGeoJson) {
     gpxLayer = L.geoJSON(state.planning.gpxGeoJson, {
       style: { color: '#f59e0b', weight: 4, opacity: 0.9 }
     }).addTo(map);
   }
 
-  const area = getProtectedArea();
+  const area = state.preparationTab === 'zone' ? null : getProtectedArea();
   if (area) {
     protectedLayer = L.geoJSON(area, {
       style: {
@@ -31,21 +31,38 @@ export function renderPlanningArea() {
 }
 
 export function getProtectedArea() {
-  if (state.planning.areaMode === 'polygon' && state.polygonAdded && state.polygonPoints.length >= 3) {
-    return {
-      type: 'Feature',
-      properties: {},
-      geometry: { type: 'Polygon', coordinates: [[
-        ...state.polygonPoints.map(([lat, lng]) => [lng, lat]),
-        [state.polygonPoints[0][1], state.polygonPoints[0][0]]
-      ]] }
-    };
-  }
+  if (state.planning.areaMode === 'polygon') return getDrawnPolygon();
 
   if (state.planning.gpxGeoJson && state.planning.bufferMeters > 0) {
     return turf.buffer(state.planning.gpxGeoJson, state.planning.bufferMeters, { units: 'meters' });
   }
   return null;
+}
+
+export function getPolygonAreaKm2() {
+  const polygon = getDrawnPolygon();
+  if (!polygon) return 0;
+  if (!window.turf) throw new Error('Le calcul de surface est indisponible. Vérifiez la connexion puis rechargez la page.');
+  if (window.turf.booleanValid && !window.turf.booleanValid(polygon)) {
+    throw new Error('Le contour dessiné est invalide. Modifiez la zone avant de calculer la flotte.');
+  }
+  const areaKm2 = window.turf.area(polygon) / 1_000_000;
+  if (!Number.isFinite(areaKm2) || areaKm2 <= 0) {
+    throw new Error('La zone dessinée est invalide ou sa surface est nulle.');
+  }
+  return areaKm2;
+}
+
+function getDrawnPolygon() {
+  if (!state.polygonAdded || state.polygonPoints.length < 3) return null;
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: { type: 'Polygon', coordinates: [[
+      ...state.polygonPoints.map(([lat, lng]) => [lng, lat]),
+      [state.polygonPoints[0][1], state.polygonPoints[0][0]]
+    ]] }
+  };
 }
 
 export function getProtectedBounds() {

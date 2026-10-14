@@ -24,6 +24,7 @@ But 2 : Coordonner l'emploi en prenant en compte les contraintes de chaque drone
 - Le placement tient compte de la couverture du chemin et de la zone, de l'avancement de l'opération et du seuil maximal de chevauchement autorisé.
 - L'option de minimisation des déplacements réutilise les positions du dernier calcul et ne déplace une équipe que si le gain de couverture le justifie.
 - Le fond de carte peut être basculé entre OpenStreetMap et satellite. La gestion des modèles, les exports et l'analyse météo restent disponibles.
+- L'onglet **Sans chemin** estime, à partir d'une zone dessinée, les drones et télépilotes nécessaires selon le taux de couverture choisi. Les estimations par modèle et en flotte mixte sont comparées au stock et aux télépilotes déjà affectés; elles restent théoriques et ne remplacent pas un calcul de placement.
 
 ## Carte 
 Pour récupérer la carte 

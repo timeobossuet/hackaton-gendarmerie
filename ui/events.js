@@ -17,7 +17,7 @@ import {
   setWeatherVisibility
 } from './weather/scanner.js';
 import { parseGpx } from './planning/gpx.js';
-import { fitMapToGpx, renderPlanningArea } from './planning/area.js';
+import { fitMapToGpx, getPolygonAreaKm2, renderPlanningArea } from './planning/area.js';
 import { calculatePlacement, clearPlacement } from './planning/placement.js';
 import { getLeafletMap } from './map.js';
 import { assignedDroneCount, resetPilotRadii, syncFleet } from './planning/fleet.js';
@@ -59,6 +59,14 @@ export function bindEvents({ render }) {
     state.missionMenuOpen = !state.missionMenuOpen;
     render();
   });
+  $('#planning-tab-route')?.addEventListener('click', () => {
+    state.preparationTab = 'route';
+    render();
+  });
+  $('#planning-tab-zone')?.addEventListener('click', () => {
+    state.preparationTab = 'zone';
+    render();
+  });
   $('#drone-settings-toggle').addEventListener('click', () => {
     state.droneSettingsOpen = !state.droneSettingsOpen;
     render();
@@ -90,8 +98,8 @@ export function bindEvents({ render }) {
       render();
     }
   });
-  $('#import-gpx').addEventListener('click', () => $('#gpx-file').click());
-  $('#gpx-file').addEventListener('change', (event) => loadGpx(event, render));
+  $('#import-gpx')?.addEventListener('click', () => $('#gpx-file')?.click());
+  $('#gpx-file')?.addEventListener('change', (event) => loadGpx(event, render));
   $('#area-buffer')?.addEventListener('click', () => {
     state.planning.areaMode = 'buffer';
     state.drawingPolygon = false;
@@ -107,6 +115,18 @@ export function bindEvents({ render }) {
   $('#buffer-slider')?.addEventListener('input', updateBuffer);
   $('#buffer-slider')?.addEventListener('change', persistMissions);
   $('#max-collision-input')?.addEventListener('input', updateMaxCollisionPercent);
+  $('#fleet-coverage-slider')?.addEventListener('input', updateFleetCoverage);
+  $('#fleet-coverage-slider')?.addEventListener('change', () => {
+    persistMissions();
+    render();
+  });
+  document.querySelectorAll('[data-coverage-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.planning.targetCoverage = Number(button.dataset.coveragePreset);
+      persistMissions();
+      render();
+    });
+  });
   $('#add-zone')?.addEventListener('click', () => {
     state.drawingPolygon = true;
     state.polygonPoints = [];
@@ -136,11 +156,11 @@ export function bindEvents({ render }) {
     if (state.planning.placement) state.planning.placement.stale = true;
     persistMissions();
   });
-  $('#path-weight').addEventListener('input', updatePlacementWeight);
-  $('#area-weight').addEventListener('input', updatePlacementWeight);
-  $('#path-weight').addEventListener('change', persistMissions);
-  $('#area-weight').addEventListener('change', persistMissions);
-  $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
+  $('#path-weight')?.addEventListener('input', updatePlacementWeight);
+  $('#area-weight')?.addEventListener('input', updatePlacementWeight);
+  $('#path-weight')?.addEventListener('change', persistMissions);
+  $('#area-weight')?.addEventListener('change', persistMissions);
+  $('#optimize-placement')?.addEventListener('click', () => optimizePlacement(render));
   $('#weather-toggle').addEventListener('click', () => {
     state.weatherVisible = !state.weatherVisible;
     setWeatherVisibility(state.weatherVisible);
@@ -314,6 +334,21 @@ function updatePlacementWeight(event) {
   state.planning[key] = Number(event.target.value);
   $(`#${key.replace('Weight', '-weight-value')}`).textContent = event.target.value;
   if (state.planning.placement) state.planning.placement.stale = true;
+}
+
+function updateFleetCoverage(event) {
+  const targetCoverage = Math.max(50, Math.min(100, Number(event.target.value) || 80));
+  state.planning.targetCoverage = targetCoverage;
+  const value = $('#fleet-coverage-value');
+  if (value) value.textContent = `${targetCoverage}%`;
+
+  try {
+    const targetAreaKm2 = getPolygonAreaKm2() * (targetCoverage / 100);
+    const targetArea = $('#fleet-target-area');
+    if (targetArea) targetArea.textContent = `${targetAreaKm2.toFixed(2)} km²`;
+  } catch (error) {
+    showMapHint(error.message);
+  }
 }
 
 async function optimizePlacement(render) {

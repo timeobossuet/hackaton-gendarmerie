@@ -16,6 +16,7 @@ Ce dossier contient uniquement le code de l'interface graphique de la dashboard.
 - `weather/popup.js` : contenu des détails météo et compatibilité des drones.
 - `planning/gpx.js` : lecture des fichiers GPX importés par l'utilisateur.
 - `planning/area.js` : tracé GPX, buffer ou polygone de protection et cadrage de la carte.
+- `planning/calculator.js` : estimation de flotte pour une zone dessinée sans chemin, à partir des portées du catalogue.
 - `planning/placement.js` : orchestration du calcul de placement et rendu des couvertures/collisions.
 - `state.js` : état local de l'interface.
 
@@ -40,3 +41,7 @@ zone protégée et ne dépend plus d'une recherche de ville ni de données stati
 Le moteur de placement historique reste dans [../src/drones.js](../src/drones.js),
 mais son panneau HTML automatique a été supprimé. L'UI AERIS lui transmet les
 paramètres et affiche ses résultats dans le panneau de configuration.
+
+L'onglet **Sans chemin** utilise uniquement le polygone validé. Il calcule des
+estimations théoriques selon le taux de couverture demandé et les portées des
+modèles enregistrés, sans modifier le stock ni les affectations de télépilotes.

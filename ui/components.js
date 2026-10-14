@@ -1,6 +1,8 @@
 import { MAP_CONFIG } from './config.js';
 import { droneModels, state } from './state.js';
 import { componentIcon } from './icons.js';
+import { getPolygonAreaKm2 } from './planning/area.js';
+import { calculateFleetRequirements } from './planning/calculator.js';
 import {
   MIN_RADIUS, RADIUS_STEP, MAX_PILOTS, MAX_NAME_LENGTH, MAX_ID_LENGTH,
   assignedDroneCount, availableDroneCount, formatRadius, getPilotModel, hasCustomRadius, isPlacementStale
@@ -173,7 +175,7 @@ function panelFrame({ side, title, eyebrow, content, open }) {
         <div>
         <div class="text-[10px] font-bold uppercase tracking-widest text-gendarmerie-blue">${eyebrow}</div>
         <h1 class="mt-1 text-sm font-semibold">${title}</h1>
-        ${side === 'left' ? `<p class="mt-1 text-[10px] leading-4 text-notion-500">1. Définissez la zone · 2. Placez les drones</p>` : ''}
+        ${side === 'left' ? `<p class="mt-1 text-[10px] leading-4 text-notion-500">Choisissez le mode de préparation de la mission.</p>` : ''}
         </div>
         ${side === 'right' ? `<button id="minimize-right" title="Réduire les options de la carte" type="button" class="shrink-0 rounded-md p-1 text-notion-500 transition hover:bg-gendarmerie-beige/40 hover:text-gendarmerie-blue">${componentIcon('minimize', 'h-4 w-4')}</button>` : ''}
       </div>
@@ -267,7 +269,131 @@ function leftPanelComponent() {
     </div>
   `;
 
-  return panelFrame({ side: 'left', eyebrow: 'Configuration', title: 'Préparer la mission', content, open: state.leftMenuOpen });
+  const panelContent = state.preparationTab === 'zone'
+    ? zoneDimensioningComponent()
+    : content;
+  return panelFrame({
+    side: 'left',
+    eyebrow: 'Configuration',
+    title: 'Préparer la mission',
+    content: `${preparationTabs()}${panelContent}`,
+    open: state.leftMenuOpen
+  });
+}
+
+function preparationTabs() {
+  return `
+    <div class="mb-3 grid grid-cols-2 gap-1 rounded-md bg-gendarmerie-beige/45 p-1 text-[10px]" role="tablist" aria-label="Mode de préparation">
+      <button id="planning-tab-route" type="button" role="tab" aria-selected="${state.preparationTab !== 'zone'}" class="rounded px-2 py-2 transition ${state.preparationTab !== 'zone' ? 'bg-white font-semibold text-notion-900 shadow-sm' : 'text-notion-500 hover:text-notion-900'}">Avec chemin</button>
+      <button id="planning-tab-zone" type="button" role="tab" aria-selected="${state.preparationTab === 'zone'}" class="rounded px-2 py-2 transition ${state.preparationTab === 'zone' ? 'bg-white font-semibold text-notion-900 shadow-sm' : 'text-notion-500 hover:text-notion-900'}">Sans chemin</button>
+    </div>
+  `;
+}
+
+function zoneDimensioningComponent() {
+  const hasZone = state.polygonAdded && state.polygonPoints.length >= 3;
+  const targetCoverage = Math.max(50, Math.min(100, Number(state.planning.targetCoverage) || 80));
+  let areaKm2 = 0;
+  let areaError = null;
+  if (hasZone) {
+    try {
+      areaKm2 = getPolygonAreaKm2();
+    } catch (error) {
+      areaError = error.message;
+    }
+  }
+  const estimate = hasZone && !areaError
+    ? calculateFleetRequirements(areaKm2, targetCoverage, droneModels)
+    : null;
+
+  return `
+    <div class="space-y-3">
+      <section class="rounded-md border border-notion-200 bg-notion-50 p-3">
+        <h2 class="text-xs font-semibold text-notion-800">Dimensionner une zone sans chemin</h2>
+        <p class="mt-1 text-[10px] leading-4 text-notion-500">Dessinez uniquement le périmètre de la mission. Aucun tracé GPX n’est nécessaire pour estimer les drones et télépilotes.</p>
+        <button id="add-zone" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gendarmerie-beige bg-white px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-gendarmerie-blue hover:bg-gendarmerie-beige/30">
+          ${componentIcon('map', 'h-4 w-4')} ${state.drawingPolygon ? 'Cliquez sur la carte pour placer les points' : (state.polygonAdded ? 'Modifier la zone' : 'Dessiner la zone')}
+        </button>
+        ${state.drawingPolygon ? `<button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-gendarmerie-blue px-3 py-2 text-xs font-semibold text-white transition hover:bg-gendarmerie-navy disabled:cursor-not-allowed disabled:opacity-50" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone (${state.polygonPoints.length} points)</button>` : ''}
+      </section>
+      ${hasZone && !areaError ? `
+        <section class="rounded-md border border-notion-200 p-3">
+          <div class="flex items-center justify-between text-[10px]">
+            <span class="font-semibold text-notion-700">Surface dessinée</span>
+            <strong class="text-aeris">${areaKm2.toFixed(2)} km²</strong>
+          </div>
+          <label class="mt-3 block text-[10px] text-notion-700">
+            <span class="flex justify-between font-semibold"><span>Couverture souhaitée</span><strong id="fleet-coverage-value" class="text-aeris">${targetCoverage}%</strong></span>
+            <input id="fleet-coverage-slider" type="range" min="50" max="100" step="5" value="${targetCoverage}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
+          </label>
+          <div class="mt-1 flex items-center justify-between gap-1">
+            <span class="text-[9px] text-notion-400">Paliers rapides</span>
+            <div class="flex gap-1">
+              ${[80, 90, 100].map((percent) => `<button type="button" data-coverage-preset="${percent}" class="rounded px-1.5 py-0.5 text-[9px] font-medium transition ${targetCoverage === percent ? 'bg-gendarmerie-blue text-white' : 'bg-notion-100 text-notion-600 hover:bg-notion-200'}">${percent}%</button>`).join('')}
+            </div>
+          </div>
+          <p class="mt-2 text-[9px] text-notion-500">Surface cible : <strong id="fleet-target-area">${estimate.targetAreaKm2.toFixed(2)} km²</strong></p>
+        </section>
+        <section id="fleet-cards-container" class="space-y-2">
+          ${fleetEstimateCards(estimate)}
+        </section>
+        <p class="rounded-md bg-amber-50 px-2.5 py-2 text-[9px] leading-4 text-amber-800">Estimation théorique fondée sur la surface π × portée² de chaque drone. La forme de la zone, le chevauchement et le relief peuvent nécessiter davantage de moyens. Chaque drone nécessite un télépilote.</p>
+      ` : `
+        <div class="rounded-md border ${areaError ? 'border-red-200 bg-red-50 text-red-700' : 'border-dashed border-notion-300 bg-notion-50/50 text-notion-500'} p-3 text-center">
+          <p class="text-[10px] leading-4">${areaError ? escapeHtml(areaError) : 'Validez un polygone d’au moins trois points pour obtenir la surface et le dimensionnement de la flotte.'}</p>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function fleetEstimateCards(estimate) {
+  if (!estimate.scenarios.length) {
+    return `<p class="rounded-md bg-amber-50 px-2.5 py-2 text-[10px] text-amber-800">Aucun modèle de drone ne possède de portée valide.</p>`;
+  }
+
+  const scenarioCard = ({ model, count, coverageAreaKm2 }, emphasized = false) => {
+    const stock = Number(state.planning.droneStock?.[model.id]) || 0;
+    const assigned = assignedDroneCount(model.id);
+    const droneDeficit = Math.max(0, count - stock);
+    const pilotDeficit = Math.max(0, count - assigned);
+    return `
+      <div class="flex justify-between gap-2 text-[9px] text-notion-600">
+        <span class="truncate">${escapeHtml(model.model)} × ${count}</span>
+        <span class="shrink-0">Stock ${stock} · TP ${assigned}</span>
+      </div>
+      <div class="mt-1 grid grid-cols-2 gap-1 text-[9px]">
+        <span class="rounded bg-notion-50 px-1.5 py-1 ${droneDeficit ? 'text-amber-700' : 'text-green-700'}">${droneDeficit ? `+${droneDeficit} drone(s) à prévoir` : 'Stock suffisant'}</span>
+        <span class="rounded bg-notion-50 px-1.5 py-1 ${pilotDeficit ? 'text-amber-700' : 'text-green-700'}">${pilotDeficit ? `+${pilotDeficit} TP à affecter` : 'TP suffisants'}</span>
+      </div>
+      ${emphasized ? `<p class="mt-1 text-[9px] text-notion-500">Couverture théorique : ${coverageAreaKm2.toFixed(2)} km²</p>` : ''}
+    `;
+  };
+
+  return `
+    ${estimate.scenarios.map((scenario) => `
+      <article class="rounded-md border border-notion-200 bg-white p-2.5">
+        <div class="mb-1 flex items-center justify-between gap-2">
+          <h3 class="truncate text-[10px] font-semibold text-notion-800">${escapeHtml(scenario.model.model)} · ${formatRadius(scenario.model.maxRange)}</h3>
+          <span class="shrink-0 rounded bg-gendarmerie-beige/50 px-1.5 py-0.5 text-[9px] text-notion-600">${scenario.count} drone(s) · ${scenario.count} TP</span>
+        </div>
+        ${scenarioCard(scenario, true)}
+      </article>
+    `).join('')}
+    ${estimate.mixed ? `
+      <article class="rounded-md border border-gendarmerie-blue/30 bg-blue-50/50 p-2.5">
+        <div class="mb-1 flex items-center justify-between gap-2">
+          <h3 class="text-[10px] font-semibold text-gendarmerie-blue">Flotte mixte · cible 80/20</h3>
+          <span class="shrink-0 rounded bg-white px-1.5 py-0.5 text-[9px] text-notion-600">${estimate.mixed.total} drone(s) · ${estimate.mixed.total} TP</span>
+        </div>
+        <p class="mb-1 text-[9px] text-notion-600">${estimate.mixed.shortCount} (${Math.round(estimate.mixed.shortCount / estimate.mixed.total * 100)}%) × ${escapeHtml(estimate.mixed.shortModel.model)} + ${estimate.mixed.longCount} (${Math.round(estimate.mixed.longCount / estimate.mixed.total * 100)}%) × ${escapeHtml(estimate.mixed.longModel.model)}</p>
+        <p class="mb-1 text-[9px] text-notion-500">Couverture théorique : ${estimate.mixed.coverageAreaKm2.toFixed(2)} km²</p>
+        ${scenarioCard({ model: estimate.mixed.shortModel, count: estimate.mixed.shortCount })}
+        <div class="my-1 border-t border-gendarmerie-blue/10"></div>
+        ${scenarioCard({ model: estimate.mixed.longModel, count: estimate.mixed.longCount })}
+      </article>
+    ` : ''}
+  `;
 }
 
 function fleetListComponent() {
