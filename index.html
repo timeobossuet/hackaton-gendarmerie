@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f7f7f5" />
+    <meta name="theme-color" content="#101e30" />
     <title>AERIS — Carte de mission</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.tailwindcss.com"></script>
@@ -27,7 +27,12 @@
                             900: '#101e30',
                             950: '#0a1320',
                         },
-                        aeris: '#101e30'
+                        aeris: '#034a90',
+                        gendarmerie: {
+                            blue: '#034a90',
+                            beige: '#d8d3c4',
+                            navy: '#101e30'
+                        }
                     },
                     boxShadow: {
                         panel: '0 8px 30px rgba(25, 25, 24, 0.08)'
@@ -43,14 +48,14 @@
         .leaflet-top, .leaflet-bottom { z-index: 10; }
         .leaflet-control-zoom { display: none; }
         .weather-popup { min-width: 260px; color: #101e30; }
-        .weather-popup-header { border-bottom: 1px solid #e1e7f0; padding-bottom: 8px; font-size: 12px; font-weight: 700; }
-        .weather-popup-header span { display: block; margin-top: 2px; color: #718eb8; font-size: 10px; font-weight: 400; }
+        .weather-popup-header { border-bottom: 1px solid #d8d3c4; padding-bottom: 8px; font-size: 12px; font-weight: 700; }
+        .weather-popup-header span { display: block; margin-top: 2px; color: #034a90; font-size: 10px; font-weight: 400; }
         .weather-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 10px 0; }
-        .weather-metrics div { border: 1px solid #e1e7f0; border-radius: 6px; padding: 6px; }
-        .weather-metrics small { display: block; color: #718eb8; font-size: 9px; text-transform: uppercase; }
+        .weather-metrics div { border: 1px solid #d8d3c4; border-radius: 6px; padding: 6px; }
+        .weather-metrics small { display: block; color: #034a90; font-size: 9px; text-transform: uppercase; }
         .weather-metrics strong { display: block; margin-top: 2px; font-size: 12px; }
         .weather-stability { border-radius: 6px; padding: 7px; font-size: 10px; font-weight: 600; text-align: center; }
-        .weather-drone-title { margin: 10px 0 5px; color: #718eb8; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+        .weather-drone-title { margin: 10px 0 5px; color: #034a90; font-size: 9px; font-weight: 700; text-transform: uppercase; }
         .weather-drone { display: flex; justify-content: space-between; border-radius: 5px; margin-top: 4px; padding: 6px; font-size: 10px; }
         .weather-good { color: #15803d; background: #f0fdf4; }
         .weather-warning { color: #b45309; background: #fffbeb; }

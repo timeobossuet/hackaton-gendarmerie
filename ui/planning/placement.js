@@ -9,9 +9,9 @@ function getOptimizer() {
   return window.DroneOptimizer;
 }
 
-export function clearPlacement() {
+export function clearPlacement({ preserveState = false } = {}) {
   placementLayer?.clearLayers();
-  state.planning.placement = null;
+  if (!preserveState) state.planning.placement = null;
 }
 
 export function calculatePlacement() {

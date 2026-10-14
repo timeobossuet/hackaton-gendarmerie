@@ -94,22 +94,22 @@ export function renderMissionPolygon() {
 
   if (state.polygonAdded) {
     missionLayer = L.polygon(state.polygonPoints, {
-      color: '#238b82',
+      color: '#034a90',
       weight: 2,
       dashArray: '6 5',
-      fillColor: '#238b82',
+      fillColor: '#034a90',
       fillOpacity: 0.18
     }).addTo(mapInstance);
   } else {
     draftLayer = L.layerGroup().addTo(mapInstance);
     L.polyline(state.polygonPoints, {
-      color: '#238b82',
+      color: '#034a90',
       weight: 2,
       dashArray: '5 5'
     }).addTo(draftLayer);
     state.polygonPoints.forEach((point) => L.circleMarker(point, {
       radius: 5,
-      color: '#238b82',
+      color: '#034a90',
       weight: 2,
       fillColor: '#ffffff',
       fillOpacity: 1

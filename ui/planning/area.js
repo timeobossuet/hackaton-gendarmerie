@@ -21,7 +21,7 @@ export function renderPlanningArea() {
   if (area) {
     protectedLayer = L.geoJSON(area, {
       style: {
-        color: state.planning.areaMode === 'buffer' ? '#dc2626' : '#238b82',
+        color: state.planning.areaMode === 'buffer' ? '#dc2626' : '#034a90',
         weight: 2,
         dashArray: state.planning.areaMode === 'buffer' ? '6 4' : '4 4',
         fillOpacity: 0.18

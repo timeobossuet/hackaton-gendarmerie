@@ -1,5 +1,5 @@
 import { MAP_CONFIG, SELECTORS } from './config.js';
-import { state } from './state.js';
+import { activateMission, addMission, persistMissions, removeActiveMission, renameMission, state } from './state.js';
 import { $ } from './dom.js';
 import {
   bindMapDrawing,
@@ -35,6 +35,29 @@ export function bindEvents({ render }) {
     state.rightMenuOpen = !state.rightMenuOpen;
     render();
   });
+  $('#mission-menu-toggle').addEventListener('click', () => {
+    state.missionMenuOpen = !state.missionMenuOpen;
+    render();
+  });
+  $('#new-mission-top').addEventListener('click', () => createNewMission(render));
+  document.querySelectorAll('.mission-select').forEach((button) => {
+    button.addEventListener('click', () => switchMission(button.dataset.missionId, render));
+  });
+  document.querySelectorAll('.mission-delete').forEach((button) => {
+    button.addEventListener('click', () => deleteMission(button.dataset.deleteMission, render));
+  });
+  $('#create-mission')?.addEventListener('click', () => createNewMission(render));
+  $('#new-mission-name')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') createNewMission(render);
+  });
+  $('#rename-mission')?.addEventListener('click', () => {
+    const active = state.missions.find(({ id }) => id === state.activeMissionId);
+    const name = window.prompt('Nom de la mission', active?.name || '');
+    if (name?.trim()) {
+      renameMission(name);
+      render();
+    }
+  });
   $('#import-gpx').addEventListener('click', () => $('#gpx-file').click());
   $('#gpx-file').addEventListener('change', (event) => loadGpx(event, render));
   $('#area-buffer')?.addEventListener('click', () => {
@@ -62,7 +85,6 @@ export function bindEvents({ render }) {
   $('#path-weight').addEventListener('input', updatePlacementWeight);
   $('#area-weight').addEventListener('input', updatePlacementWeight);
   $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
-  $('#restart-mission').addEventListener('click', () => restartMission(render));
   $('#weather-toggle').addEventListener('click', () => {
     state.weatherVisible = !state.weatherVisible;
     setWeatherVisibility(state.weatherVisible);
@@ -117,37 +139,53 @@ async function optimizePlacement(render) {
   }
 }
 
-function restartMission(render) {
+function refreshMissionView() {
   cancelWeatherScan();
-  clearPlacement();
-  state.polygonAdded = false;
   state.drawingPolygon = false;
-  state.polygonPoints = [];
-  state.planning = {
-    areaMode: 'buffer',
-    bufferMeters: 200,
-    gpxFileName: null,
-    gpxGeoJson: null,
-    smallDrones: 3,
-    largeDrones: 2,
-    pathWeight: 10,
-    areaWeight: 1,
-    calculating: false,
-    placement: null,
-    placementError: null
-  };
-  state.weather = {
-    gridSize: 5,
-    scanning: false,
-    progress: 0,
-    location: null,
-    error: null,
-    cells: []
-  };
   const map = getLeafletMap();
   map?.setView(MAP_CONFIG.defaultCenter, MAP_CONFIG.defaultZoom);
   renderMissionPolygon();
   renderPlanningArea();
+  if (state.planning.gpxGeoJson) fitMapToGpx();
+  if (state.planning.placement) {
+    try {
+      calculatePlacement();
+    } catch {
+      state.planning.placement = null;
+    }
+  }
+}
+
+function switchMission(id, render) {
+  clearPlacement({ preserveState: true });
+  if (!activateMission(id)) return;
+  refreshMissionView();
+  state.missionMenuOpen = false;
+  render();
+}
+
+function createNewMission(render) {
+  const input = $('#new-mission-name');
+  const name = input?.value.trim() || `Mission ${state.missions.length + 1}`;
+  clearPlacement({ preserveState: true });
+  addMission(name);
+  refreshMissionView();
+  state.missionMenuOpen = false;
+  render();
+}
+
+function deleteMission(id, render) {
+  const mission = state.missions.find((item) => item.id === id);
+  if (!mission || !window.confirm(`Supprimer la mission « ${mission.name} » ?`)) return;
+  if (id === state.activeMissionId) {
+    clearPlacement({ preserveState: true });
+    if (!removeActiveMission()) return;
+    refreshMissionView();
+  } else {
+    state.missions.splice(state.missions.indexOf(mission), 1);
+    persistMissions();
+  }
+  state.missionMenuOpen = false;
   render();
 }
 
