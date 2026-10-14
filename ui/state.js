@@ -18,6 +18,8 @@ export const state = {
     largeDrones: 2,
     pathWeight: 10,
     areaWeight: 1,
+    operationProgress: 0,
+    moveTeamWithDrone: false,
     calculating: false,
     placement: null,
     placementError: null

@@ -60,6 +60,10 @@ export function bindEvents({ render }) {
   $(SELECTORS.finishZone)?.addEventListener('click', () => finishPolygon(render));
   $('#small-drones').addEventListener('input', updateDroneOptions);
   $('#large-drones').addEventListener('input', updateDroneOptions);
+  $('#operation-progress').addEventListener('input', (event) => {
+    state.planning.operationProgress = Math.max(0, Math.min(100, Number(event.target.value) || 0));
+    $('#operation-progress-value').textContent = `${state.planning.operationProgress}%`;
+  });
   $('#path-weight').addEventListener('input', updatePlacementWeight);
   $('#area-weight').addEventListener('input', updatePlacementWeight);
   $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
@@ -141,6 +145,8 @@ function restartMission(render) {
     largeDrones: 2,
     pathWeight: 10,
     areaWeight: 1,
+    operationProgress: 0,
+    moveTeamWithDrone: false,
     calculating: false,
     placement: null,
     placementError: null

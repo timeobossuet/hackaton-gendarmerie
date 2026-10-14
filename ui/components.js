@@ -99,6 +99,11 @@ function leftPanelComponent() {
             <input id="large-drones" type="number" min="0" max="30" value="${state.planning.largeDrones}" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
           </label>
         </div>
+        <div class="mt-3 rounded-md border border-notion-200 bg-notion-50 p-2.5">
+          <label class="block text-[10px] text-notion-500">Avancée de l’opération <span id="operation-progress-value" class="font-semibold text-aeris">${state.planning.operationProgress}%</span>
+            <input id="operation-progress" type="range" min="0" max="100" step="5" value="${state.planning.operationProgress}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
+          </label>
+        </div>
         <label class="mt-3 block text-[10px] text-notion-500">Importance du chemin dans la couverture <span id="path-weight-value" class="font-semibold text-aeris">${state.planning.pathWeight}</span>
           <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
         </label>
