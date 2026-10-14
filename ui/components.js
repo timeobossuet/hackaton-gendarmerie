@@ -30,6 +30,9 @@ function topbarComponent() {
           </div>
         </div>
       </div>
+      <button id="toggle-right" title="Ouvrir ou fermer les options de la carte" type="button" class="pointer-events-auto rounded-lg border border-notion-200 bg-white/95 p-2.5 text-notion-500 shadow-panel backdrop-blur transition hover:bg-notion-100 hover:text-notion-900">
+        ${componentIcon(state.rightMenuOpen ? 'close' : 'layers', 'h-4 w-4')}
+      </button>
     </header>
   `;
 }
@@ -43,6 +46,7 @@ function panelFrame({ side, title, eyebrow, content, open }) {
       <div class="border-b border-notion-200 px-4 py-3">
         <div class="text-[10px] font-semibold uppercase tracking-widest text-notion-400">${eyebrow}</div>
         <h1 class="mt-1 text-sm font-semibold">${title}</h1>
+        ${side === 'left' ? `<p class="mt-1 text-[10px] leading-4 text-notion-500">1. Définissez la zone · 2. Placez les drones</p>` : ''}
       </div>
       <div class="max-h-[calc(100vh-10rem)] overflow-y-auto p-4">${content}</div>
     </aside>
@@ -50,35 +54,36 @@ function panelFrame({ side, title, eyebrow, content, open }) {
 }
 
 function leftPanelComponent() {
+  const hasProtectedArea = Boolean(state.planning.gpxGeoJson || state.polygonAdded);
   const content = `
     <div class="space-y-5">
       <section>
         <div class="mb-2 flex items-center justify-between">
           <h2 class="text-xs font-semibold">Chemin à protéger</h2>
-          <span class="rounded bg-notion-100 px-1.5 py-0.5 text-[10px] text-notion-500">${state.planning.gpxFileName || 'À importer'}</span>
+          <span class="rounded bg-notion-100 px-1.5 py-0.5 text-[10px] text-notion-500">${state.planning.gpxFileName ? 'Chemin chargé' : 'À faire'}</span>
         </div>
-        <p class="text-xs leading-5 text-notion-500">Importez le GPX du chemin à protéger. La carte se centrera automatiquement dessus.</p>
+        <p class="text-xs leading-5 text-notion-500">Ajoutez un fichier GPX pour définir le chemin à protéger. La carte se centrera automatiquement dessus.</p>
         <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml" class="hidden" />
         <button id="import-gpx" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-notion-400 px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
-          ${componentIcon('download', 'h-4 w-4')} ${state.planning.gpxFileName ? 'Remplacer le chemin GPX' : 'Importer un chemin GPX'}
+          ${componentIcon('download', 'h-4 w-4')} ${state.planning.gpxFileName ? 'Remplacer le fichier GPX' : 'Ajouter un fichier GPX'}
         </button>
-        ${state.planning.gpxFileName ? `<div class="mt-2 rounded-md bg-notion-50 px-2.5 py-2 text-[10px] text-notion-500">Tracé orange chargé sur la carte.</div>` : ''}
+        ${state.planning.gpxFileName ? `<div class="mt-2 rounded-md bg-green-50 px-2.5 py-2 text-[10px] text-green-700">Chemin chargé. Vous pouvez maintenant définir la zone protégée.</div>` : ''}
       </section>
       <section class="border-t border-notion-200 pt-4">
         <h2 class="mb-2 text-xs font-semibold">Zone à protéger</h2>
         <div class="grid grid-cols-2 gap-1 rounded-md bg-notion-100 p-1 text-[10px]">
-          <button id="area-buffer" type="button" class="rounded px-2 py-1.5 ${state.planning.areaMode === 'buffer' ? 'bg-white font-semibold shadow-sm' : 'text-notion-500'}">Autour du chemin</button>
-          <button id="area-polygon" type="button" class="rounded px-2 py-1.5 ${state.planning.areaMode === 'polygon' ? 'bg-white font-semibold shadow-sm' : 'text-notion-500'}">Polygone manuel</button>
+          <button id="area-buffer" type="button" aria-pressed="${state.planning.areaMode === 'buffer'}" class="rounded px-2 py-1.5 transition ${state.planning.areaMode === 'buffer' ? 'bg-white font-semibold text-notion-900 shadow-sm' : 'text-notion-500 hover:text-notion-900'}">Autour du chemin</button>
+          <button id="area-polygon" type="button" aria-pressed="${state.planning.areaMode === 'polygon'}" class="rounded px-2 py-1.5 transition ${state.planning.areaMode === 'polygon' ? 'bg-white font-semibold text-notion-900 shadow-sm' : 'text-notion-500 hover:text-notion-900'}">Dessiner une zone</button>
         </div>
         ${state.planning.areaMode === 'buffer' ? `
-          <label class="mt-3 block text-[10px] text-notion-500">Distance du buffer <span id="buffer-value" class="font-semibold text-aeris">${state.planning.bufferMeters} m</span>
+          <label class="mt-3 block text-[10px] text-notion-500">Distance autour du chemin <span id="buffer-value" class="font-semibold text-aeris">${state.planning.bufferMeters} m</span>
             <input id="buffer-slider" type="range" min="50" max="1000" step="50" value="${state.planning.bufferMeters}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
           </label>
         ` : `
           <button id="add-zone" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-notion-400 px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
-            ${componentIcon('map', 'h-4 w-4')} ${state.drawingPolygon ? 'Cliquez sur la carte pour dessiner' : (state.polygonAdded ? 'Modifier le polygone' : 'Tracer un polygone')}
+            ${componentIcon('map', 'h-4 w-4')} ${state.drawingPolygon ? 'Cliquez sur la carte pour placer les points' : (state.polygonAdded ? 'Modifier la zone' : 'Dessiner la zone')}
           </button>
-          ${state.drawingPolygon ? `<button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-aeris px-3 py-2 text-xs font-semibold text-white" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone (${state.polygonPoints.length} points)</button>` : ''}
+          ${state.drawingPolygon ? `          <button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-aeris px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1b716a] disabled:cursor-not-allowed disabled:opacity-50" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone (${state.polygonPoints.length} points)</button>` : ''}
         `}
       </section>
       <section class="border-t border-notion-200 pt-4">
@@ -97,60 +102,63 @@ function leftPanelComponent() {
         <label class="mt-3 block text-[10px] text-notion-500">Importance du chemin dans la couverture <span id="path-weight-value" class="font-semibold text-aeris">${state.planning.pathWeight}</span>
           <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
         </label>
-        <p class="mt-1 text-[10px] leading-4 text-notion-400">Plus la valeur est élevée, plus l’algorithme favorise le tracé par rapport au reste de la zone.</p>
+        <p class="mt-1 text-[10px] leading-4 text-notion-400">Une valeur élevée concentre davantage la couverture sur le chemin.</p>
         <label class="mt-3 block text-[10px] text-notion-500">Importance de la zone à protéger <span id="area-weight-value" class="font-semibold text-aeris">${state.planning.areaWeight}</span>
           <input id="area-weight" type="range" min="1" max="100" step="1" value="${state.planning.areaWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
         </label>
-        <p class="mt-1 text-[10px] leading-4 text-notion-400">Une valeur élevée favorise une couverture homogène de toute la zone, au lieu de concentrer les drones sur le chemin.</p>
+        <p class="mt-1 text-[10px] leading-4 text-notion-400">Une valeur élevée répartit davantage les drones dans toute la zone.</p>
         <div class="mt-3 grid grid-cols-2 gap-2">
-          <button id="optimize-placement" type="button" class="rounded-md bg-aeris px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-[#1b716a]" ${state.planning.calculating ? 'disabled' : ''}>${state.planning.calculating ? 'Calcul en cours…' : 'Optimiser le placement'}</button>
+          <button id="optimize-placement" type="button" class="rounded-md bg-aeris px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-[#1b716a] disabled:cursor-not-allowed disabled:opacity-50" ${state.planning.calculating || (!state.planning.gpxGeoJson && !state.polygonAdded) ? 'disabled' : ''}>${state.planning.calculating ? 'Placement en cours…' : 'Calculer le placement'}</button>
         </div>
-        ${placementResultComponent()}
+        ${placementResultComponent(hasProtectedArea)}
       </section>
-      <button id="restart-mission" type="button" class="w-full rounded-md border border-red-200 px-3 py-2 text-[10px] font-semibold text-red-600 transition hover:bg-red-50">Recommencer la mission</button>
+      <button id="restart-mission" type="button" class="w-full rounded-md border border-notion-200 px-3 py-2 text-[10px] font-semibold text-notion-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600">Réinitialiser la mission</button>
     </div>
   `;
 
   return panelFrame({ side: 'left', eyebrow: 'Configuration', title: 'Préparer la mission', content, open: state.leftMenuOpen });
 }
 
-function placementResultComponent() {
+function placementResultComponent(hasProtectedArea) {
   if (state.planning.placementError) {
     return `<div class="mt-3 rounded-md bg-red-50 px-2.5 py-2 text-[10px] leading-4 text-red-600">${state.planning.placementError}</div>`;
   }
   const result = state.planning.placement;
-  if (!result) return `<p class="mt-3 text-[10px] leading-4 text-notion-400">Importez un chemin puis lancez l’optimisation pour afficher les zones de couverture.</p>`;
+  if (!result) return `<p class="mt-3 text-[10px] leading-4 text-notion-400">${hasProtectedArea ? 'Réglez la flotte puis calculez le placement pour afficher les zones de couverture.' : 'Ajoutez un chemin GPX ou dessinez une zone protégée pour activer le calcul.'}</p>`;
   const percent = (value) => value == null ? '—' : `${Math.round(value * 100)}%`;
   return `
-    <div class="mt-3 rounded-md bg-notion-50 p-2.5 text-[10px] leading-4 text-notion-600">
+    <div class="mt-3 rounded-md border border-green-200 bg-green-50 p-2.5 text-[10px] leading-4 text-green-800">
+      <div class="mb-2 font-semibold text-green-900">Placement calculé</div>
       <div class="grid grid-cols-2 gap-1">
-        <span>Couverture</span><strong class="text-right text-aeris">${percent(result.stats.weighted)}</strong>
-        <span>Chemin</span><strong class="text-right">${percent(result.stats.path)}</strong>
-        <span>Zone</span><strong class="text-right">${percent(result.stats.buffer ?? result.stats.poly)}</strong>
-        <span>Collisions</span><strong class="text-right">${result.collisions.pairs}</strong>
+        <span>Couverture totale</span><strong class="text-right text-green-900">${percent(result.stats.weighted)}</strong>
+        <span>Chemin couvert</span><strong class="text-right">${percent(result.stats.path)}</strong>
+        <span>Zone couverte</span><strong class="text-right">${percent(result.stats.buffer ?? result.stats.poly)}</strong>
+        <span>Zones de chevauchement</span><strong class="text-right">${result.collisions.pairs}</strong>
       </div>
     </div>
   `;
 }
 
 function rightPanelComponent() {
+  const hasProtectedArea = Boolean(state.planning.gpxGeoJson || state.polygonAdded);
   const content = `
     <div class="space-y-5">
       <section>
-        <h2 class="mb-2 text-xs font-semibold">Affichage</h2>
+        <h2 class="mb-2 text-xs font-semibold">Couches de la carte</h2>
         <button id="weather-toggle" type="button" class="flex w-full items-center justify-between rounded-md border border-notion-200 px-3 py-2.5 text-left transition hover:bg-notion-100">
           <span class="flex items-center gap-2 text-xs">${componentIcon('layers', 'h-4 w-4 text-notion-500')} Couche météo</span>
           <span class="relative h-4 w-7 rounded-full ${state.weatherVisible ? 'bg-aeris' : 'bg-notion-200'}"><span class="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${state.weatherVisible ? 'left-3.5' : 'left-0.5'}"></span></span>
         </button>
-        <p class="mt-2 text-[10px] leading-4 text-notion-500">Affiche une couche météo par-dessus la carte.</p>
+        <p class="mt-2 text-[10px] leading-4 text-notion-500">Superpose les conditions météo aux zones de couverture.</p>
       </section>
       <section class="border-t border-notion-200 pt-4">
-        <h2 class="mb-3 text-xs font-semibold">Analyse météo</h2>
-        <p class="text-[10px] leading-4 text-notion-500">La météo est calculée sur la zone à protéger autour du chemin.</p>
+        <h2 class="mb-3 text-xs font-semibold">Analyser la météo</h2>
+        <p class="text-[10px] leading-4 text-notion-500">Obtenez les conditions actuelles pour chaque secteur de la zone protégée.</p>
         <div class="mt-3 grid grid-cols-2 gap-2">
-          <label class="text-[10px] text-notion-500">Grille<input id="weather-grid-size" type="number" value="${state.weather.gridSize}" min="2" max="15" step="1" class="mt-1 w-full rounded-md border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" /></label>
-          <button id="weather-scan" type="button" class="self-end rounded-md bg-aeris px-2 py-1.5 text-[10px] font-semibold text-white">Analyser</button>
+          <label class="text-[10px] text-notion-500">Précision de la grille<input id="weather-grid-size" type="number" aria-describedby="weather-grid-help" value="${state.weather.gridSize}" min="2" max="15" step="1" class="mt-1 w-full rounded-md border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" /></label>
+          <button id="weather-scan" type="button" class="self-end rounded-md bg-aeris px-2 py-1.5 text-[10px] font-semibold text-white transition hover:bg-[#1b716a] disabled:cursor-not-allowed disabled:opacity-50" ${state.weather.scanning || !hasProtectedArea ? 'disabled' : ''}>${state.weather.scanning ? 'Analyse…' : 'Analyser la météo'}</button>
         </div>
+        <p id="weather-grid-help" class="mt-1 text-[10px] leading-4 text-notion-400">${hasProtectedArea ? 'De 2 à 15 : une grille plus fine prend plus de temps.' : 'Ajoutez d’abord un chemin ou une zone protégée.'}</p>
         <div id="weather-status" class="mt-3 ${state.weather.error || state.weather.scanning ? '' : 'hidden'} rounded-md bg-notion-100 px-2.5 py-2 text-[10px] leading-4 ${state.weather.error ? 'text-red-600' : 'text-notion-500'}">
           ${state.weather.error || (state.weather.scanning ? `Scan météo en cours... ${state.weather.progress}%` : '')}
         </div>

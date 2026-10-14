@@ -31,6 +31,10 @@ export function bindEvents({ render }) {
     state.leftMenuOpen = !state.leftMenuOpen;
     render();
   });
+  $('#toggle-right').addEventListener('click', () => {
+    state.rightMenuOpen = !state.rightMenuOpen;
+    render();
+  });
   $('#import-gpx').addEventListener('click', () => $('#gpx-file').click());
   $('#gpx-file').addEventListener('change', (event) => loadGpx(event, render));
   $('#area-buffer')?.addEventListener('click', () => {
@@ -203,7 +207,7 @@ function showWeatherStatus(message, isError = false) {
 
 function finishPolygon(render) {
   if (state.polygonPoints.length < MAP_CONFIG.polygonMinPoints) {
-    showMapHint('Ajoutez au moins 3 points');
+    showMapHint('Ajoutez encore des points pour fermer la zone');
     return;
   }
 
@@ -213,7 +217,7 @@ function finishPolygon(render) {
   renderPlanningArea();
   renderMissionPolygon();
   centerMapOnPolygon();
-  showMapHint('Zone de mission ajoutée');
+  showMapHint('Zone protégée enregistrée');
 }
 
 function showMapHint(message) {

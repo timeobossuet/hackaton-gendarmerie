@@ -36,7 +36,7 @@ export async function scanWeather(gridSize, onProgress) {
   const map = getLeafletMap();
   const area = getProtectedArea();
   const bounds = getProtectedBounds();
-  if (!area || !bounds?.isValid()) throw new Error('Importez un chemin GPX ou définissez une zone à protéger.');
+  if (!area || !bounds?.isValid()) throw new Error('Ajoutez un chemin GPX ou dessinez une zone protégée avant d’analyser la météo.');
   const size = Number(gridSize);
   if (!Number.isInteger(size) || size < 2 || size > 15) {
     throw new Error('La taille de la grille doit être comprise entre 2 et 15.');

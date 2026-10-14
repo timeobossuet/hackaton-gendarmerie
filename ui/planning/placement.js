@@ -5,7 +5,7 @@ import { getProtectedArea } from './area.js';
 let placementLayer = null;
 
 function getOptimizer() {
-  if (!window.DroneOptimizer) throw new Error('Le moteur de placement des drones est indisponible.');
+  if (!window.DroneOptimizer) throw new Error('Le calculateur de placement est indisponible. Rechargez la page puis réessayez.');
   return window.DroneOptimizer;
 }
 
@@ -19,7 +19,7 @@ export function calculatePlacement() {
   clearPlacement();
   const gpx = state.planning.gpxGeoJson;
   const area = getProtectedArea();
-  if (!gpx && !area) throw new Error('Importez un chemin GPX ou définissez une zone protégée.');
+  if (!gpx && !area) throw new Error('Ajoutez un chemin GPX ou dessinez une zone protégée avant de calculer le placement.');
 
   const lines = gpx ? optimizer.extractLines(gpx) : [];
   const rings = area ? optimizer.extractRings([area]) : [];
@@ -27,7 +27,7 @@ export function calculatePlacement() {
     small: Number(state.planning.smallDrones),
     large: Number(state.planning.largeDrones)
   };
-  if (counts.small + counts.large === 0) throw new Error('Ajoutez au moins un drone.');
+  if (counts.small + counts.large === 0) throw new Error('Indiquez au moins un drone de 1 km ou de 2 km.');
 
   const demand = optimizer.buildDemand(lines, rings, {
     radius: state.planning.bufferMeters,
