@@ -19,6 +19,8 @@ export function createMission(name = 'Mission sans nom') {
       pilotCounter: 0,
       pathWeight: 10,
       areaWeight: 1,
+      operationProgress: 0,
+      moveTeamWithDrone: false,
       calculating: false,
       placement: null,
       placementError: null
@@ -34,10 +36,21 @@ export function createMission(name = 'Mission sans nom') {
   };
 }
 
+// Complète les missions sauvegardées avant l'ajout de nouveaux champs (ex. operationProgress).
+function normalizeMission(mission) {
+  const defaults = createMission(mission?.name);
+  return {
+    ...defaults,
+    ...mission,
+    planning: { ...defaults.planning, ...mission?.planning },
+    weather: { ...defaults.weather, ...mission?.weather }
+  };
+}
+
 function loadMissions() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (Array.isArray(saved) && saved.length > 0) return saved;
+    if (Array.isArray(saved) && saved.length > 0) return saved.map(normalizeMission);
   } catch {
     // Ignore corrupted local data and start with a clean workspace.
   }
@@ -51,6 +64,7 @@ export const state = {
   leftMenuOpen: true,
   rightMenuOpen: true,
   weatherVisible: false,
+  mapStyle: 'osm',
   missionMenuOpen: false,
   activeMissionId: missions[0].id,
   missions,

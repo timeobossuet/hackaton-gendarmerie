@@ -141,6 +141,11 @@ function leftPanelComponent() {
         <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>3. Placer les drones</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
         <section class="pt-2">
         ${fleetListComponent()}
+        <div class="mt-3 rounded-md border border-notion-200 bg-notion-50 p-2.5">
+          <label class="block text-[10px] text-gray-500"><span class="flex justify-between"><span>Avancée de l’opération</span><strong id="operation-progress-value" class="font-semibold text-notion-800">${state.planning.operationProgress}%</strong></span>
+            <input id="operation-progress" type="range" min="0" max="100" step="5" value="${state.planning.operationProgress}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
+          </label>
+        </div>
         <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Importance du chemin</span><strong id="path-weight-value" class="font-semibold text-notion-800">${state.planning.pathWeight}</strong></span>
           <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
         </label>
@@ -270,6 +275,13 @@ function rightPanelComponent() {
           ${state.weather.error || (state.weather.scanning ? `Scan météo en cours... ${state.weather.progress}%` : '')}
         </div>
       </section>
+      <section class="border-t border-notion-200 pt-4">
+        <h2 class="mb-2 text-xs font-semibold">Fond de carte</h2>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="map-style-osm" type="button" class="rounded-md border px-2 py-2 text-[10px] font-medium transition ${state.mapStyle === 'osm' ? 'border-gendarmerie-blue bg-gendarmerie-blue text-white' : 'border-notion-200 bg-notion-50 text-notion-700 hover:bg-notion-100'}">Plan 2D</button>
+          <button id="map-style-satellite" type="button" class="rounded-md border px-2 py-2 text-[10px] font-medium transition ${state.mapStyle === 'satellite' ? 'border-gendarmerie-blue bg-gendarmerie-blue text-white' : 'border-notion-200 bg-notion-50 text-notion-700 hover:bg-notion-100'}">Satellite</button>
+        </div>
+      </section>
     </div>
   `;
 
@@ -277,6 +289,8 @@ function rightPanelComponent() {
 }
 
 function mapComponent() {
+  const mapAttribution = state.mapStyle === 'satellite' ? '© Esri • © OpenStreetMap contributors' : '© OpenStreetMap contributors';
+
   return `
     <div id="map" class="relative h-full w-full select-none overflow-hidden bg-[#dfe9d8]">
       <div id="map-hint" class="pointer-events-none absolute left-1/2 top-1/2 z-[1] hidden -translate-x-1/2 -translate-y-1/2 rounded-lg border border-gendarmerie-blue/30 bg-white/95 px-4 py-3 text-center shadow-panel">
@@ -291,7 +305,7 @@ function mapComponent() {
           <button id="zoom-out" type="button" aria-label="Dézoomer" class="grid h-8 w-8 place-items-center text-lg text-notion-500 hover:bg-notion-100">−</button>
         </div>
       </div>
-      <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">© OpenStreetMap contributors</div>
+      <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">${mapAttribution}</div>
     </div>
   `;
 }

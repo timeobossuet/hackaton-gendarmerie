@@ -7,6 +7,7 @@ let missionLayer = null;
 let draftLayer = null;
 let lastView = null;
 let resizeHandlerBound = false;
+let baseLayers = {};
 
 export function initializeMap() {
   const currentContainer = getMapElement();
@@ -34,13 +35,42 @@ export function initializeMap() {
     resizeHandlerBound = true;
   }
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(mapInstance);
+  baseLayers = {
+    osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
+    }),
+    satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles © Esri • © OpenStreetMap contributors'
+    })
+  };
 
+  setMapStyle(state.mapStyle || 'osm', { skipState: true });
   renderMissionPolygon();
   return mapInstance;
+}
+
+export function setMapStyle(styleName, options = {}) {
+  const activeStyle = styleName === 'satellite' ? 'satellite' : 'osm';
+  const layer = baseLayers[activeStyle];
+
+  if (!mapInstance || !layer) return null;
+
+  Object.entries(baseLayers).forEach(([name, baseLayer]) => {
+    if (mapInstance.hasLayer(baseLayer)) {
+      mapInstance.removeLayer(baseLayer);
+    }
+    if (name === activeStyle) {
+      baseLayer.addTo(mapInstance);
+    }
+  });
+
+  if (!options.skipState) {
+    state.mapStyle = activeStyle;
+  }
+
+  return layer;
 }
 
 export function getLeafletMap() {

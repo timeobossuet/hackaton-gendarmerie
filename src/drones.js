@@ -17,15 +17,13 @@
  *   4. Raffinement fin : petit déplacement sur la grille fine autour de chaque pilote
  *   5. Affichage : cercles de couverture + zones de collision (intersections) en rouge
  *
- * Dépendances (déjà chargées dans ton HTML) : Leaflet, Turf.js
- * Dépend aussi des variables globales de testCharles.js :
- *   map, zonesLayer, currentGpxGeoJson, currentRadius
+ * Module de calcul pur (aucune dépendance au DOM, à Leaflet ni aux globales de testCharles.js).
  * ========================================================================== */
 (function (global) {
   "use strict";
 
   const CONFIG = {
-    radii: { small: 1000, large: 2000 },   // rayons de couverture en mètres
+    radii: { small: 300, large: 2000 },   // rayons de couverture en mètres
     targetPoints: 4000,                    // nombre cible de points de demande
     minStep: 20,                           // pas de grille min (m)
     maxStep: 400,                          // pas de grille max (m)
@@ -33,6 +31,11 @@
     maxPathCandidates: 150,                // positions candidates (sur le tracé)
     maxLocalSearchIter: 20,
     maxRefinePass: 6,
+    // Pondération temporelle (avancée de l'opération) : continue, sans cas spécial 0 % / 100 %
+    time: { behind: 0.08, ahead: 0.3, floor: 0.03, pathBoost: 2.5 },
+    // Coût de déplacement d'un drone déjà posé (en fraction du poids total à couvrir) :
+    // un déplacement n'est accepté que si le gain de couverture le dépasse.
+    move: { fixed: 0.015, perRadius: 0.04, ignoreBelow: 5 },
     colors: { small: "#e51e64", large: "#8e24aa", collision: "#ff1744" }
   };
 
@@ -103,12 +106,12 @@
     return L;
   }
 
-  // Échantillonne une polyligne tous les `spacing` mètres
+  // Échantillonne une polyligne tous les `spacing` mètres -> [x, y, s] (s = distance depuis le début)
   function samplePolyline(pts, spacing) {
     const out = [];
     if (!pts.length) return out;
-    out.push(pts[0]);
-    let carry = 0;
+    out.push([pts[0][0], pts[0][1], 0]);
+    let carry = 0, walked = 0;
     for (let i = 1; i < pts.length; i++) {
       const x0 = pts[i - 1][0], y0 = pts[i - 1][1];
       const dx = pts[i][0] - x0, dy = pts[i][1] - y0;
@@ -116,15 +119,25 @@
       if (len === 0) continue;
       let d = spacing - carry;
       while (d <= len) {
-        out.push([x0 + (dx * d) / len, y0 + (dy * d) / len]);
+        out.push([x0 + (dx * d) / len, y0 + (dy * d) / len, walked + d]);
         d += spacing;
       }
       carry = len - (d - spacing);
+      walked += len;
     }
     const last = pts[pts.length - 1];
     const prev = out[out.length - 1];
-    if (Math.hypot(last[0] - prev[0], last[1] - prev[1]) > spacing * 0.25) out.push(last);
+    if (Math.hypot(last[0] - prev[0], last[1] - prev[1]) > spacing * 0.25) out.push([last[0], last[1], walked]);
     return out;
+  }
+
+  // Importance d'un point du tracé selon l'avancée t : maximale au front (ratio ≈ t),
+  // décroît doucement vers l'avant (zone à anticiper) et plus vite vers l'arrière (déjà fait).
+  function timeFactor(ratio, t) {
+    const T = CONFIG.time;
+    const delta = ratio - t;
+    const sigma = delta >= 0 ? T.ahead : T.behind;
+    return T.floor + (1 - T.floor) * Math.exp(-((delta / sigma) ** 2));
   }
 
   /* ======================================================================
@@ -134,6 +147,7 @@
 
   function buildDemand(lines, rings, opts) {
     const R = opts.radius, wPath = Math.max(1, opts.wPath), wPoly = opts.wPoly;
+    const timeProgress = Math.max(0, Math.min(1, Number(opts.timeProgress) || 0));
 
     const first = lines.length ? lines[0][0] : rings[0][0];
     const proj = makeProjection(first[0], first[1]);
@@ -149,18 +163,25 @@
 
     const KEY = (i, j) => (i + 1e6) * 4e6 + (j + 1e6);
 
-    // --- points sur le chemin
+    // --- points sur le chemin (poids selon l'avancée de l'opération)
     const pathPts = [];
     const dense = [];
-    pLines.forEach(l => {
-      samplePolyline(l, step).forEach(p => pathPts.push(p));
-      samplePolyline(l, step / 2).forEach(p => dense.push(p));
+    const hasPath = pLines.length > 0;
+    const totalPathLength = pLines.reduce((sum, line) => sum + polylineLength(line), 0);
+    const tf = sArc => (hasPath && totalPathLength ? timeFactor(sArc / totalPathLength, timeProgress) : 1);
+    let offset = 0;
+    pLines.forEach(line => {
+      samplePolyline(line, step).forEach(p => {
+        pathPts.push({ x: p[0], y: p[1], weight: wPath * CONFIG.time.pathBoost * tf(offset + p[2]) });
+      });
+      samplePolyline(line, step / 2).forEach(p => dense.push([p[0], p[1], offset + p[2]]));
+      offset += polylineLength(line);
     });
 
     // --- grille autour du chemin (distance min au tracé)
     const bufCells = new Map();
     const R2 = R * R;
-    for (const [sx, sy] of dense) {
+    for (const [sx, sy, ss] of dense) {
       const i0 = Math.floor((sx - R) / step), i1 = Math.floor((sx + R) / step);
       const j0 = Math.floor((sy - R) / step), j1 = Math.floor((sy + R) / step);
       for (let i = i0; i <= i1; i++) {
@@ -170,8 +191,8 @@
           if (d2 > R2) continue;
           const k = KEY(i, j);
           const c = bufCells.get(k);
-          if (!c) bufCells.set(k, { i, j, d2 });
-          else if (d2 < c.d2) c.d2 = d2;
+          if (!c) bufCells.set(k, { i, j, d2, s: ss });
+          else if (d2 < c.d2) { c.d2 = d2; c.s = ss; }
         }
       }
     }
@@ -195,16 +216,29 @@
     const X = [], Y = [], W = [], CAT = [], GI = [], GJ = [];
     const push = (x, y, w, cat, i, j) => { X.push(x); Y.push(y); W.push(w); CAT.push(cat); GI.push(i); GJ.push(j); };
 
-    pathPts.forEach(p => push(p[0], p[1], wPath, 0, 0, 0));
+    // abscisse curviligne du point du tracé le plus proche (pour les cellules du polygone hors buffer)
+    const sub = dense.filter((_, idx) => idx % Math.max(1, Math.ceil(dense.length / 500)) === 0);
+    const nearestS = (x, y) => {
+      let best = Infinity, sArc = 0;
+      for (const p of sub) {
+        const d = (p[0] - x) * (p[0] - x) + (p[1] - y) * (p[1] - y);
+        if (d < best) { best = d; sArc = p[2]; }
+      }
+      return sArc;
+    };
+
+    pathPts.forEach(p => push(p.x, p.y, p.weight, 0, 0, 0));
 
     for (const [k, c] of bufCells) {
       const d = Math.sqrt(c.d2);
       let w = 1 + (wPath - 1) * (1 - d / R);          // décroît linéairement de wPath à 1
       if (polyCells.has(k)) { w = Math.max(w, wPoly); polyCells.delete(k); }
+      w *= tf(c.s);                                   // la zone suit l'avancée comme le tracé
       push((c.i + 0.5) * step, (c.j + 0.5) * step, w, 1, c.i, c.j);
     }
     for (const c of polyCells.values()) {
-      push((c.i + 0.5) * step, (c.j + 0.5) * step, wPoly, 2, c.i, c.j);
+      const cx = (c.i + 0.5) * step, cy = (c.j + 0.5) * step;
+      push(cx, cy, hasPath ? wPoly * tf(nearestS(cx, cy)) : wPoly, 2, c.i, c.j);
     }
 
     return {
@@ -220,147 +254,146 @@
    * 3. Optimisation : glouton + recherche locale + raffinement
    * ====================================================================== */
 
-    function optimize(demand, counts, fleet) {
-    const { n, nPath, X, Y, W, CAT, GI, GJ, step } = demand;
+function optimize(demand, counts, fleet) {
+  const { n, nPath, X, Y, W, CAT, GI, GJ, step } = demand;
 
-    // --- flotte : une entrée par pilote { id, name, type, radius }
-    // Repli de compatibilité si on t'appelle encore avec de simples compteurs.
-    if (!Array.isArray(fleet) || !fleet.length) {
-      fleet = [];
-      ["small", "large"].forEach(t => {
-        for (let k = 0; k < (counts?.[t] || 0); k++) {
-          fleet.push({ id: `${t}-${k + 1}`, name: `${t} ${k + 1}`, type: t, radius: CONFIG.radii[t] });
-        }
-      });
-    }
-    fleet = fleet.map(p => ({
-      id: p.id,
-      name: p.name,
-      type: p.type,
-      radius: Number(p.radius) > 0 ? Number(p.radius) : CONFIG.radii[p.type]
-    }));
-    if (!fleet.length) throw new Error("Aucun pilote à placer.");
-
-    const mod = (a, k) => ((a % k) + k) % k;
-
-    // --- positions candidates (sous-échantillon des points de demande)
-    const nGrid = n - nPath;
-    const kGrid = Math.max(1, Math.ceil(Math.sqrt(nGrid / CONFIG.maxGridCandidates)));
-    const kPath = Math.max(1, Math.ceil(nPath / CONFIG.maxPathCandidates));
-    let cand = [];
-    for (let idx = 0; idx < n; idx++) {
-      if (CAT[idx] === 0) { if (idx % kPath === 0) cand.push(idx); }
-      else if (mod(GI[idx], kGrid) === 0 && mod(GJ[idx], kGrid) === 0) cand.push(idx);
-    }
-    if (cand.length < 5) {
-      const k = Math.max(1, Math.ceil(n / CONFIG.maxGridCandidates));
-      cand = [];
-      for (let idx = 0; idx < n; idx += k) cand.push(idx);
-    }
-
-    // --- listes de couverture, mises en cache PAR RAYON
-    const tmp = new Int32Array(n);
-    const coverList = (x, y, rr2) => {
-      let m = 0;
-      for (let i = 0; i < n; i++) {
-        const dx = X[i] - x, dy = Y[i] - y;
-        if (dx * dx + dy * dy <= rr2) tmp[m++] = i;
+  // Flotte : une entrée par pilote { id, name, type, radius }
+  if (!Array.isArray(fleet) || !fleet.length) {
+    fleet = [];
+    ["small", "large"].forEach(t => {
+      for (let k = 0; k < (counts?.[t] || 0); k++) {
+        fleet.push({ id: `${t}-${k + 1}`, name: `${t} ${k + 1}`, type: t, radius: CONFIG.radii[t] });
       }
-      return tmp.slice(0, m);
-    };
-    const listsByRadius = new Map();
-    const getLists = radius => {
-      let lists = listsByRadius.get(radius);
-      if (!lists) {
-        const rr2 = radius * radius;
-        lists = cand.map(ci => coverList(X[ci], Y[ci], rr2));
-        listsByRadius.set(radius, lists);
-      }
-      return lists;
-    };
-
-    const covered = new Uint8Array(n);
-    const gainOf = list => {
-      let g = 0;
-      for (let k = 0; k < list.length; k++) { const i = list[k]; if (covered[i] === 0) g += W[i]; }
-      return g;
-    };
-    const apply = (list, d) => { for (let k = 0; k < list.length; k++) covered[list[k]] += d; };
-
-    // --- 1) glouton : à chaque tour, meilleur couple (rayon restant, candidat)
-    const pending = fleet.slice();
-    const pilots = [];
-    while (pending.length) {
-      let best = { g: -1, radius: null, c: -1 };
-      for (const radius of new Set(pending.map(p => p.radius))) {
-        const L = getLists(radius);
-        for (let c = 0; c < cand.length; c++) {
-          const g = gainOf(L[c]);
-          if (g > best.g) best = { g, radius, c };
-        }
-      }
-      // les pilotes de même rayon sont interchangeables : on prend le premier
-      const meta = pending.splice(pending.findIndex(p => p.radius === best.radius), 1)[0];
-      const list = getLists(best.radius)[best.c];
-      pilots.push({ ...meta, x: X[cand[best.c]], y: Y[cand[best.c]], list });
-      apply(list, +1);
-    }
-
-    // --- 2) recherche locale : on retire un pilote et on le replace au mieux
-    for (let iter = 0; iter < CONFIG.maxLocalSearchIter; iter++) {
-      let improved = false;
-      for (const p of pilots) {
-        apply(p.list, -1);
-        let bestG = gainOf(p.list), bestC = -1;
-        const L = getLists(p.radius);
-        for (let c = 0; c < cand.length; c++) {
-          const g = gainOf(L[c]);
-          if (g > bestG + 1e-9) { bestG = g; bestC = c; }
-        }
-        if (bestC >= 0) {
-          p.x = X[cand[bestC]]; p.y = Y[cand[bestC]]; p.list = L[bestC];
-          improved = true;
-        }
-        apply(p.list, +1);
-      }
-      if (!improved) break;
-    }
-
-    // --- 3) raffinement fin autour de chaque pilote (toute la grille fine)
-    const refineR2 = Math.pow(1.5 * step * kGrid, 2);
-    for (let pass = 0; pass < CONFIG.maxRefinePass; pass++) {
-      let improved = false;
-      for (const p of pilots) {
-        const rr2 = p.radius * p.radius;
-        apply(p.list, -1);
-        let bestG = gainOf(p.list), best = null;
-        for (let i = 0; i < n; i++) {
-          const dx = X[i] - p.x, dy = Y[i] - p.y;
-          if (dx * dx + dy * dy > refineR2) continue;
-          const l = coverList(X[i], Y[i], rr2);
-          const g = gainOf(l);
-          if (g > bestG + 1e-9) { bestG = g; best = { i, l }; }
-        }
-        if (best) { p.x = X[best.i]; p.y = Y[best.i]; p.list = best.l; improved = true; }
-        apply(p.list, +1);
-      }
-      if (!improved) break;
-    }
-
-    // --- statistiques
-    let wTot = 0, wCov = 0;
-    const cnt = [0, 0, 0], cov = [0, 0, 0];
-    for (let i = 0; i < n; i++) {
-      wTot += W[i]; cnt[CAT[i]]++;
-      if (covered[i] > 0) { wCov += W[i]; cov[CAT[i]]++; }
-    }
-    const pct = c => (cnt[c] ? cov[c] / cnt[c] : null);
-    return {
-      // id, name, type, radius conservés : placement.js retrouve chaque TP par son id
-      pilots: pilots.map(p => ({ id: p.id, name: p.name, type: p.type, radius: p.radius, x: p.x, y: p.y })),
-      stats: { weighted: wCov / wTot, path: pct(0), buffer: pct(1), poly: pct(2) }
-    };
+    });
   }
+  fleet = fleet.map(p => ({
+    id: p.id,
+    name: p.name,
+    type: p.type,
+    radius: Number(p.radius) > 0 ? Number(p.radius) : CONFIG.radii[p.type]
+  }));
+  if (!fleet.length) throw new Error("Aucun pilote à placer.");
+
+  const mod = (a, k) => ((a % k) + k) % k;
+
+  // Positions candidates (sous-échantillon des points de demande)
+  const nGrid = n - nPath;
+  const kGrid = Math.max(1, Math.ceil(Math.sqrt(nGrid / CONFIG.maxGridCandidates)));
+  const kPath = Math.max(1, Math.ceil(nPath / CONFIG.maxPathCandidates));
+  let cand = [];
+  for (let idx = 0; idx < n; idx++) {
+    if (CAT[idx] === 0) { if (idx % kPath === 0) cand.push(idx); }
+    else if (mod(GI[idx], kGrid) === 0 && mod(GJ[idx], kGrid) === 0) cand.push(idx);
+  }
+  if (cand.length < 5) {
+    const k = Math.max(1, Math.ceil(n / CONFIG.maxGridCandidates));
+    cand = [];
+    for (let idx = 0; idx < n; idx += k) cand.push(idx);
+  }
+
+  // Listes de couverture, mises en cache PAR RAYON
+  const tmp = new Int32Array(n);
+  const coverList = (x, y, rr2) => {
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      const dx = X[i] - x, dy = Y[i] - y;
+      if (dx * dx + dy * dy <= rr2) tmp[m++] = i;
+    }
+    return tmp.slice(0, m);
+  };
+  const listsByRadius = new Map();
+  const getLists = radius => {
+    let lists = listsByRadius.get(radius);
+    if (!lists) {
+      const rr2 = radius * radius;
+      lists = cand.map(ci => coverList(X[ci], Y[ci], rr2));
+      listsByRadius.set(radius, lists);
+    }
+    return lists;
+  };
+
+  let wTot = 0;
+  for (let i = 0; i < n; i++) wTot += W[i];
+
+  const covered = new Uint8Array(n);
+  const gainOf = list => {
+    let g = 0;
+    for (let k = 0; k < list.length; k++) { const i = list[k]; if (covered[i] === 0) g += W[i]; }
+    return g;
+  };
+  const apply = (list, d) => { for (let k = 0; k < list.length; k++) covered[list[k]] += d; };
+
+  // Glouton : à chaque tour, meilleur couple (rayon restant, candidat)
+  const pending = fleet.slice();
+  const pilots = [];
+  while (pending.length) {
+    let best = { g: -1, radius: null, c: -1 };
+    for (const radius of new Set(pending.map(p => p.radius))) {
+      const L = getLists(radius);
+      for (let c = 0; c < cand.length; c++) {
+        const g = gainOf(L[c]);
+        if (g > best.g) best = { g, radius, c };
+      }
+    }
+    const meta = pending.splice(pending.findIndex(p => p.radius === best.radius), 1)[0];
+    const list = getLists(best.radius)[best.c];
+    pilots.push({ ...meta, x: X[cand[best.c]], y: Y[cand[best.c]], list });
+    apply(list, +1);
+  }
+
+  // Recherche locale
+  for (let iter = 0; iter < CONFIG.maxLocalSearchIter; iter++) {
+    let improved = false;
+    for (const p of pilots) {
+      apply(p.list, -1);
+      let bestG = gainOf(p.list), bestC = -1;
+      const L = getLists(p.radius);
+      for (let c = 0; c < cand.length; c++) {
+        const g = gainOf(L[c]);
+        if (g > bestG + 1e-9) { bestG = g; bestC = c; }
+      }
+      if (bestC >= 0) {
+        p.x = X[cand[bestC]]; p.y = Y[cand[bestC]]; p.list = L[bestC];
+        improved = true;
+      }
+      apply(p.list, +1);
+    }
+    if (!improved) break;
+  }
+
+  // Raffinement fin
+  const refineR2 = Math.pow(1.5 * step * kGrid, 2);
+  for (let pass = 0; pass < CONFIG.maxRefinePass; pass++) {
+    let improved = false;
+    for (const p of pilots) {
+      const rr2 = p.radius * p.radius;
+      apply(p.list, -1);
+      let bestG = gainOf(p.list), best = null;
+      for (let i = 0; i < n; i++) {
+        const dx = X[i] - p.x, dy = Y[i] - p.y;
+        if (dx * dx + dy * dy > refineR2) continue;
+        const l = coverList(X[i], Y[i], rr2);
+        const g = gainOf(l);
+        if (g > bestG + 1e-9) { bestG = g; best = { i, l }; }
+      }
+      if (best) { p.x = X[best.i]; p.y = Y[best.i]; p.list = best.l; improved = true; }
+      apply(p.list, +1);
+    }
+    if (!improved) break;
+  }
+
+  let wCov = 0;
+  const cnt = [0, 0, 0], cov = [0, 0, 0];
+  for (let i = 0; i < n; i++) {
+    cnt[CAT[i]]++;
+    if (covered[i] > 0) { wCov += W[i]; cov[CAT[i]]++; }
+  }
+  const pct = c => (cnt[c] ? cov[c] / cnt[c] : null);
+  return {
+    pilots: pilots.map(p => ({ id: p.id, name: p.name, type: p.type, radius: p.radius, x: p.x, y: p.y })),
+    stats: { weighted: wCov / wTot, path: pct(0), buffer: pct(1), poly: pct(2) }
+  };
+}
 
   // Exposé pour les tests / usage externe
   global.DroneOptimizer = { buildDemand, optimize, extractLines, extractRings, CONFIG };

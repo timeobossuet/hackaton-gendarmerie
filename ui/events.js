@@ -7,6 +7,7 @@ import {
   centerMapOnPolygon,
   initializeMap,
   renderMissionPolygon,
+  setMapStyle,
   zoomBy
 } from './map.js';
 import {
@@ -96,7 +97,10 @@ export function bindEvents({ render }) {
     syncCircleRadii();
     render();
   });
-
+  $('#operation-progress').addEventListener('input', (event) => {
+    state.planning.operationProgress = Math.max(0, Math.min(100, Number(event.target.value) || 0));
+    $('#operation-progress-value').textContent = `${state.planning.operationProgress}%`;
+  });
   $('#path-weight').addEventListener('input', updatePlacementWeight);
   $('#area-weight').addEventListener('input', updatePlacementWeight);
   $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
@@ -110,6 +114,14 @@ export function bindEvents({ render }) {
   $('#zoom-out').addEventListener('click', () => zoomBy(-state.zoomSensitivity));
   $('#zoom-settings').addEventListener('click', () => toggleZoomSettings(render));
   $('#zoom-sensitivity')?.addEventListener('input', updateZoomSensitivity);
+  $('#map-style-osm')?.addEventListener('click', () => {
+    setMapStyle('osm');
+    render();
+  });
+  $('#map-style-satellite')?.addEventListener('click', () => {
+    setMapStyle('satellite');
+    render();
+  });
   $('#weather-scan').addEventListener('click', scanFromControls);
 }
 
