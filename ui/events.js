@@ -7,6 +7,7 @@ import {
   centerMapOnPolygon,
   initializeMap,
   renderMissionPolygon,
+  setMapStyle,
   zoomBy
 } from './map.js';
 import {
@@ -73,6 +74,14 @@ export function bindEvents({ render }) {
   $('#zoom-out').addEventListener('click', () => zoomBy(-state.zoomSensitivity));
   $('#zoom-settings').addEventListener('click', () => toggleZoomSettings(render));
   $('#zoom-sensitivity')?.addEventListener('input', updateZoomSensitivity);
+  $('#map-style-osm')?.addEventListener('click', () => {
+    setMapStyle('osm');
+    render();
+  });
+  $('#map-style-satellite')?.addEventListener('click', () => {
+    setMapStyle('satellite');
+    render();
+  });
   $('#weather-scan').addEventListener('click', scanFromControls);
 }
 

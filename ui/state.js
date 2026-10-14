@@ -5,6 +5,7 @@ export const state = {
   leftMenuOpen: true,
   rightMenuOpen: true,
   weatherVisible: false,
+  mapStyle: 'osm',
   polygonAdded: false,
   drawingPolygon: false,
   polygonPoints: [],

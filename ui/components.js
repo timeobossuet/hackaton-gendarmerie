@@ -165,7 +165,11 @@ function rightPanelComponent() {
       </section>
       <section class="border-t border-notion-200 pt-4">
         <h2 class="mb-2 text-xs font-semibold">Carte</h2>
-        <div class="space-y-1 text-xs">
+        <div class="grid grid-cols-2 gap-2">
+          <button id="map-style-osm" type="button" class="rounded-md border px-2 py-2 text-[10px] font-medium transition ${state.mapStyle === 'osm' ? 'border-aeris bg-aeris text-white' : 'border-notion-200 bg-notion-50 text-notion-700 hover:bg-notion-100'}">Plan 2D</button>
+          <button id="map-style-satellite" type="button" class="rounded-md border px-2 py-2 text-[10px] font-medium transition ${state.mapStyle === 'satellite' ? 'border-aeris bg-aeris text-white' : 'border-notion-200 bg-notion-50 text-notion-700 hover:bg-notion-100'}">Satellite</button>
+        </div>
+        <div class="mt-3 space-y-1 text-xs">
           <button id="export-map" type="button" class="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-notion-700 transition hover:bg-notion-100">${componentIcon('download', 'h-4 w-4 text-notion-500')} Exporter la carte</button>
         </div>
       </section>
@@ -176,6 +180,8 @@ function rightPanelComponent() {
 }
 
 function mapComponent() {
+  const mapAttribution = state.mapStyle === 'satellite' ? '© Esri • © OpenStreetMap contributors' : '© OpenStreetMap contributors';
+
   return `
     <div id="map" class="relative h-full w-full select-none overflow-hidden bg-[#dfe9d8]">
       <div id="map-hint" class="pointer-events-none absolute left-1/2 top-1/2 z-[1] hidden -translate-x-1/2 -translate-y-1/2 rounded-lg border border-aeris/30 bg-white/95 px-4 py-3 text-center shadow-panel">
@@ -189,7 +195,7 @@ function mapComponent() {
           <button id="zoom-out" type="button" aria-label="Dézoomer" class="grid h-8 w-8 place-items-center text-lg text-notion-500 hover:bg-notion-100">−</button>
         </div>
       </div>
-      <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">© OpenStreetMap contributors</div>
+      <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">${mapAttribution}</div>
     </div>
   `;
 }
