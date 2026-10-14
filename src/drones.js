@@ -220,10 +220,27 @@
    * 3. Optimisation : glouton + recherche locale + raffinement
    * ====================================================================== */
 
-  function optimize(demand, counts, radii) {
+    function optimize(demand, counts, fleet) {
     const { n, nPath, X, Y, W, CAT, GI, GJ, step } = demand;
-    radii = radii || CONFIG.radii;
-    const r2 = { small: radii.small * radii.small, large: radii.large * radii.large };
+
+    // --- flotte : une entrée par pilote { id, name, type, radius }
+    // Repli de compatibilité si on t'appelle encore avec de simples compteurs.
+    if (!Array.isArray(fleet) || !fleet.length) {
+      fleet = [];
+      ["small", "large"].forEach(t => {
+        for (let k = 0; k < (counts?.[t] || 0); k++) {
+          fleet.push({ id: `${t}-${k + 1}`, name: `${t} ${k + 1}`, type: t, radius: CONFIG.radii[t] });
+        }
+      });
+    }
+    fleet = fleet.map(p => ({
+      id: p.id,
+      name: p.name,
+      type: p.type,
+      radius: Number(p.radius) > 0 ? Number(p.radius) : CONFIG.radii[p.type]
+    }));
+    if (!fleet.length) throw new Error("Aucun pilote à placer.");
+
     const mod = (a, k) => ((a % k) + k) % k;
 
     // --- positions candidates (sous-échantillon des points de demande)
@@ -241,7 +258,7 @@
       for (let idx = 0; idx < n; idx += k) cand.push(idx);
     }
 
-    // --- listes de couverture précalculées
+    // --- listes de couverture, mises en cache PAR RAYON
     const tmp = new Int32Array(n);
     const coverList = (x, y, rr2) => {
       let m = 0;
@@ -251,11 +268,16 @@
       }
       return tmp.slice(0, m);
     };
-    const types = [];
-    if (counts.small > 0) types.push("small");
-    if (counts.large > 0) types.push("large");
-    const lists = {};
-    types.forEach(t => { lists[t] = cand.map(ci => coverList(X[ci], Y[ci], r2[t])); });
+    const listsByRadius = new Map();
+    const getLists = radius => {
+      let lists = listsByRadius.get(radius);
+      if (!lists) {
+        const rr2 = radius * radius;
+        lists = cand.map(ci => coverList(X[ci], Y[ci], rr2));
+        listsByRadius.set(radius, lists);
+      }
+      return lists;
+    };
 
     const covered = new Uint8Array(n);
     const gainOf = list => {
@@ -265,24 +287,23 @@
     };
     const apply = (list, d) => { for (let k = 0; k < list.length; k++) covered[list[k]] += d; };
 
-    // --- 1) glouton
-    const remaining = { small: counts.small, large: counts.large };
-    const total = counts.small + counts.large;
+    // --- 1) glouton : à chaque tour, meilleur couple (rayon restant, candidat)
+    const pending = fleet.slice();
     const pilots = [];
-    for (let p = 0; p < total; p++) {
-      let best = { g: -1, t: null, c: -1 };
-      for (const t of types) {
-        if (remaining[t] <= 0) continue;
-        const L = lists[t];
+    while (pending.length) {
+      let best = { g: -1, radius: null, c: -1 };
+      for (const radius of new Set(pending.map(p => p.radius))) {
+        const L = getLists(radius);
         for (let c = 0; c < cand.length; c++) {
           const g = gainOf(L[c]);
-          if (g > best.g) best = { g, t, c };
+          if (g > best.g) best = { g, radius, c };
         }
       }
-      const list = lists[best.t][best.c];
-      pilots.push({ type: best.t, x: X[cand[best.c]], y: Y[cand[best.c]], list });
+      // les pilotes de même rayon sont interchangeables : on prend le premier
+      const meta = pending.splice(pending.findIndex(p => p.radius === best.radius), 1)[0];
+      const list = getLists(best.radius)[best.c];
+      pilots.push({ ...meta, x: X[cand[best.c]], y: Y[cand[best.c]], list });
       apply(list, +1);
-      remaining[best.t]--;
     }
 
     // --- 2) recherche locale : on retire un pilote et on le replace au mieux
@@ -291,7 +312,7 @@
       for (const p of pilots) {
         apply(p.list, -1);
         let bestG = gainOf(p.list), bestC = -1;
-        const L = lists[p.type];
+        const L = getLists(p.radius);
         for (let c = 0; c < cand.length; c++) {
           const g = gainOf(L[c]);
           if (g > bestG + 1e-9) { bestG = g; bestC = c; }
@@ -310,12 +331,13 @@
     for (let pass = 0; pass < CONFIG.maxRefinePass; pass++) {
       let improved = false;
       for (const p of pilots) {
+        const rr2 = p.radius * p.radius;
         apply(p.list, -1);
         let bestG = gainOf(p.list), best = null;
         for (let i = 0; i < n; i++) {
           const dx = X[i] - p.x, dy = Y[i] - p.y;
           if (dx * dx + dy * dy > refineR2) continue;
-          const l = coverList(X[i], Y[i], r2[p.type]);
+          const l = coverList(X[i], Y[i], rr2);
           const g = gainOf(l);
           if (g > bestG + 1e-9) { bestG = g; best = { i, l }; }
         }
@@ -334,7 +356,8 @@
     }
     const pct = c => (cnt[c] ? cov[c] / cnt[c] : null);
     return {
-      pilots: pilots.map(p => ({ type: p.type, x: p.x, y: p.y, radius: radii[p.type] })),
+      // id, name, type, radius conservés : placement.js retrouve chaque TP par son id
+      pilots: pilots.map(p => ({ id: p.id, name: p.name, type: p.type, radius: p.radius, x: p.x, y: p.y })),
       stats: { weighted: wCov / wTot, path: pct(0), buffer: pct(1), poly: pct(2) }
     };
   }

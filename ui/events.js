@@ -19,11 +19,18 @@ import { parseGpx } from './planning/gpx.js';
 import { fitMapToGpx, renderPlanningArea } from './planning/area.js';
 import { calculatePlacement, clearPlacement } from './planning/placement.js';
 import { getLeafletMap } from './map.js';
+import { resetPilotRadii, syncFleet } from './planning/fleet.js';
+import { configureRadiusEditor, syncCircleRadii } from './planning/radius-editor.js';
 
 export function bindEvents({ render }) {
   initializeMap();
   bindMapInteractions();
   renderPlanningArea();
+  syncFleet();
+  configureRadiusEditor({
+    onRadiusCommit: () => render(),
+    onRecalculate: () => optimizePlacement(render)
+  });
   initializeWeatherLayer();
   setWeatherVisibility(state.weatherVisible);
 
@@ -80,8 +87,15 @@ export function bindEvents({ render }) {
     bindMapDrawing();
   });
   $(SELECTORS.finishZone)?.addEventListener('click', () => finishPolygon(render));
-  $('#small-drones').addEventListener('input', updateDroneOptions);
-  $('#large-drones').addEventListener('input', updateDroneOptions);
+
+  $('#small-drones').addEventListener('change', () => render());
+  $('#large-drones').addEventListener('change', () => render());
+  $('#reset-radii')?.addEventListener('click', () => {
+    resetPilotRadii();
+    syncCircleRadii();
+    render();
+  });
+
   $('#path-weight').addEventListener('input', updatePlacementWeight);
   $('#area-weight').addEventListener('input', updatePlacementWeight);
   $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
@@ -116,6 +130,7 @@ function updateBuffer(event) {
 
 function updateDroneOptions(event) {
   state.planning[event.target.id === 'small-drones' ? 'smallDrones' : 'largeDrones'] = Math.max(0, Math.min(30, Number(event.target.value) || 0));
+  syncFleet();
 }
 
 function updatePlacementWeight(event) {

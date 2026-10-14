@@ -15,6 +15,8 @@ export function createMission(name = 'Mission sans nom') {
       gpxGeoJson: null,
       smallDrones: 3,
       largeDrones: 2,
+      fleet: [],
+      pilotCounter: 0,
       pathWeight: 10,
       areaWeight: 1,
       calculating: false,

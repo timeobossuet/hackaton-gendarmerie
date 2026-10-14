@@ -1,6 +1,7 @@
 import { MAP_CONFIG } from './config.js';
 import { state } from './state.js';
 import { componentIcon } from './icons.js';
+import { formatRadius, hasCustomRadius, isPlacementStale } from './planning/fleet.js';
 
 export function appShell() {
   return `
@@ -147,6 +148,7 @@ function leftPanelComponent() {
             <input id="large-drones" type="number" min="0" max="30" value="${state.planning.largeDrones}" class="mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
           </label>
         </div>
+        ${fleetListComponent()}
         <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Importance du chemin</span><strong id="path-weight-value" class="font-semibold text-notion-800">${state.planning.pathWeight}</strong></span>
           <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
         </label>
@@ -167,6 +169,28 @@ function leftPanelComponent() {
   return panelFrame({ side: 'left', eyebrow: 'Configuration', title: 'Préparer la mission', content, open: state.leftMenuOpen });
 }
 
+function fleetListComponent() {
+  const fleet = state.planning.fleet ?? [];
+  if (!fleet.length) return '';
+  const customCount = fleet.filter(hasCustomRadius).length;
+  return `
+    <div class="mt-3 rounded-md border border-notion-200">
+      <div class="flex items-center justify-between border-b border-notion-200 px-2.5 py-2">
+        <span class="text-[10px] font-semibold text-notion-700">Télépilotes (${fleet.length})</span>
+        ${customCount ? `<button id="reset-radii" type="button" class="text-[10px] font-semibold text-aeris hover:underline">Rayons par défaut</button>` : ''}
+      </div>
+      <ul class="max-h-40 divide-y divide-notion-100 overflow-y-auto">
+        ${fleet.map((pilot) => `
+          <li class="flex items-center justify-between px-2.5 py-1.5 text-[10px]">
+            <span><span class="font-semibold text-notion-800">${pilot.name}</span> <span class="text-notion-400">${pilot.id}</span></span>
+            <span class="${hasCustomRadius(pilot) ? 'font-semibold text-aeris' : 'text-notion-500'}">${formatRadius(pilot.radius)}</span>
+          </li>`).join('')}
+      </ul>
+      <p class="border-t border-notion-100 px-2.5 py-2 text-[10px] leading-4 text-notion-400">Survolez un cercle sur la carte pour réduire le rayon d'un TP, puis recalculez.</p>
+    </div>
+  `;
+}
+
 function placementResultComponent(hasProtectedArea) {
   if (state.planning.placementError) {
     return `<div class="mt-3 rounded-md bg-red-50 px-2.5 py-2 text-[10px] leading-4 text-red-600">${state.planning.placementError}</div>`;
@@ -183,6 +207,7 @@ function placementResultComponent(hasProtectedArea) {
         <span>Zone couverte</span><strong class="text-right">${percent(result.stats.buffer ?? result.stats.poly)}</strong>
         <span>Zones de chevauchement</span><strong class="text-right">${result.collisions.pairs}</strong>
       </div>
+        ${isPlacementStale() ? `<div class="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-700">Des rayons ont changé depuis le dernier calcul : relancez le placement.</div>` : ''}
     </div>
   `;
 }
