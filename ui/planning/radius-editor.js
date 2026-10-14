@@ -5,7 +5,7 @@ import {
 } from './fleet.js';
 
 const HIDE_DELAY = 350;
-const registry = new Map(); // id du TP -> cercle Leaflet
+const registry = new Map(); // id du TP -> { circle, marker, ref }
 let card = null;
 let hideTimer = null;
 let dragging = false;
@@ -25,19 +25,42 @@ export function resetRadiusEditor() {
 
 // Remet les cercles affichés à la taille des rayons du state (après un reset).
 export function syncCircleRadii() {
-  registry.forEach((circle, id) => {
+  registry.forEach(({ circle }, id) => {
     const pilot = getPilot(id);
     if (pilot) circle.setRadius(pilot.radius);
   });
 }
 
+export function renameRadiusEditorEntry(oldId, newId) {
+  const entry = registry.get(oldId);
+  if (!entry) return;
+  registry.delete(oldId);
+  entry.ref.id = newId;
+  registry.set(newId, entry);
+  entry.marker.setTooltipContent(newId);
+  if (current?.pilotId === oldId) current.pilotId = newId;
+}
+
+export function removeRadiusEditorEntry(id) {
+  const entry = registry.get(id);
+  if (!entry) return;
+  if (current?.pilotId === id) {
+    window.clearTimeout(hideTimer);
+    hideCard();
+  }
+  entry.circle.remove();
+  entry.marker.remove();
+  registry.delete(id);
+}
+
 export function bindRadiusEditor(pilotId, circle, marker) {
-  registry.set(pilotId, circle);
+  const ref = { id: pilotId }; // mutable : l'ID peut être renommé après coup
+  registry.set(pilotId, { circle, marker, ref });
 
   const open = (event) => {
     window.clearTimeout(hideTimer);
     circle.setStyle({ weight: 3, fillOpacity: 0.16 });
-    showCard(pilotId, circle, event);
+    showCard(ref.id, circle, event);
   };
   const close = () => {
     circle.setStyle({ weight: 2, fillOpacity: 0.08 });

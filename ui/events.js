@@ -21,6 +21,7 @@ import { calculatePlacement, clearPlacement } from './planning/placement.js';
 import { getLeafletMap } from './map.js';
 import { resetPilotRadii, syncFleet } from './planning/fleet.js';
 import { configureRadiusEditor, syncCircleRadii } from './planning/radius-editor.js';
+import { bindFleetPanel } from './planning/fleet-panel.js';
 
 export function bindEvents({ render }) {
   initializeMap();
@@ -88,8 +89,8 @@ export function bindEvents({ render }) {
   });
   $(SELECTORS.finishZone)?.addEventListener('click', () => finishPolygon(render));
 
-  $('#small-drones').addEventListener('change', () => render());
-  $('#large-drones').addEventListener('change', () => render());
+  bindFleetPanel({ render });
+
   $('#reset-radii')?.addEventListener('click', () => {
     resetPilotRadii();
     syncCircleRadii();
@@ -128,11 +129,6 @@ function updateBuffer(event) {
   renderPlanningArea();
 }
 
-function updateDroneOptions(event) {
-  state.planning[event.target.id === 'small-drones' ? 'smallDrones' : 'largeDrones'] = Math.max(0, Math.min(30, Number(event.target.value) || 0));
-  syncFleet();
-}
-
 function updatePlacementWeight(event) {
   const key = event.target.id === 'path-weight' ? 'pathWeight' : 'areaWeight';
   state.planning[key] = Number(event.target.value);
@@ -155,6 +151,7 @@ async function optimizePlacement(render) {
 }
 
 function refreshMissionView() {
+  state.selectedPilotId = null;
   cancelWeatherScan();
   state.drawingPolygon = false;
   const map = getLeafletMap();

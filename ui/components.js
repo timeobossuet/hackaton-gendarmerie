@@ -1,7 +1,10 @@
 import { MAP_CONFIG } from './config.js';
 import { state } from './state.js';
 import { componentIcon } from './icons.js';
-import { formatRadius, hasCustomRadius, isPlacementStale } from './planning/fleet.js';
+import {
+  PILOT_TYPES, MIN_RADIUS, RADIUS_STEP, MAX_PILOTS, MAX_NAME_LENGTH, MAX_ID_LENGTH,
+  formatRadius, hasCustomRadius, isPlacementStale
+} from './planning/fleet.js';
 
 export function appShell() {
   return `
@@ -137,17 +140,6 @@ function leftPanelComponent() {
       <details open class="group border-t border-notion-200 pt-3">
         <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>3. Placer les drones</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
         <section class="pt-2">
-        <div class="mb-3 flex items-center justify-between">
-          <span class="text-[10px] text-notion-400">${Number(state.planning.smallDrones) + Number(state.planning.largeDrones)} drones</span>
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 1 km
-            <input id="small-drones" type="number" min="0" max="30" value="${state.planning.smallDrones}" class="mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
-          </label>
-          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 2 km
-            <input id="large-drones" type="number" min="0" max="30" value="${state.planning.largeDrones}" class="mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
-          </label>
-        </div>
         ${fleetListComponent()}
         <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Importance du chemin</span><strong id="path-weight-value" class="font-semibold text-notion-800">${state.planning.pathWeight}</strong></span>
           <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
@@ -171,24 +163,66 @@ function leftPanelComponent() {
 
 function fleetListComponent() {
   const fleet = state.planning.fleet ?? [];
-  if (!fleet.length) return '';
   const customCount = fleet.filter(hasCustomRadius).length;
+  const full = fleet.length >= MAX_PILOTS;
+  const addClass = 'add-pilot rounded-md border border-dashed border-gendarmerie-beige px-2 py-1.5 text-[10px] font-semibold text-notion-700 transition hover:border-gendarmerie-blue hover:bg-gendarmerie-beige/30 disabled:cursor-not-allowed disabled:opacity-50';
   return `
-    <div class="mt-3 rounded-md border border-notion-200">
+    <div class="rounded-md border border-notion-200">
       <div class="flex items-center justify-between border-b border-notion-200 px-2.5 py-2">
         <span class="text-[10px] font-semibold text-notion-700">Télépilotes (${fleet.length})</span>
         ${customCount ? `<button id="reset-radii" type="button" class="text-[10px] font-semibold text-aeris hover:underline">Rayons par défaut</button>` : ''}
       </div>
-      <ul class="max-h-40 divide-y divide-notion-100 overflow-y-auto">
-        ${fleet.map((pilot) => `
-          <li class="flex items-center justify-between px-2.5 py-1.5 text-[10px]">
-            <span><span class="font-semibold text-notion-800">${pilot.name}</span> <span class="text-notion-400">${pilot.id}</span></span>
-            <span class="${hasCustomRadius(pilot) ? 'font-semibold text-aeris' : 'text-notion-500'}">${formatRadius(pilot.radius)}</span>
-          </li>`).join('')}
-      </ul>
-      <p class="border-t border-notion-100 px-2.5 py-2 text-[10px] leading-4 text-notion-400">Survolez un cercle sur la carte pour réduire le rayon d'un TP, puis recalculez.</p>
+      ${fleet.length
+        ? `<ul class="max-h-72 divide-y divide-notion-100 overflow-y-auto">${fleet.map(pilotRowComponent).join('')}</ul>`
+        : `<p class="px-2.5 py-3 text-[10px] leading-4 text-notion-400">Aucun TP. Ajoutez au moins un drone pour calculer le placement.</p>`}
+      <div class="grid grid-cols-2 gap-2 border-t border-notion-100 p-2">
+        <button type="button" data-add-pilot="small" class="${addClass}" ${full ? 'disabled' : ''}>+ Drone ${PILOT_TYPES.small.label}</button>
+        <button type="button" data-add-pilot="large" class="${addClass}" ${full ? 'disabled' : ''}>+ Drone ${PILOT_TYPES.large.label}</button>
+      </div>
+      <p class="border-t border-notion-100 px-2.5 py-2 text-[10px] leading-4 text-notion-400">Cliquez sur un TP pour modifier son nom, son identifiant ou son rayon, puis recalculez.${full ? ` Maximum : ${MAX_PILOTS} TP.` : ''}</p>
     </div>
   `;
+}
+
+function pilotRowComponent(pilot) {
+  const open = state.selectedPilotId === pilot.id;
+  const custom = hasCustomRadius(pilot);
+  const id = escapeHtml(pilot.id);
+  return `
+    <li class="text-[10px] ${open ? 'bg-gendarmerie-beige/20' : ''}">
+      <div class="flex items-center">
+        <button type="button" data-pilot-toggle="${id}" aria-expanded="${open}" class="pilot-toggle flex min-w-0 flex-1 items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-notion-100">
+          <span class="min-w-0 truncate"><span class="font-semibold text-notion-800">${escapeHtml(pilot.name)}</span> <span class="text-notion-400">${id} · ${PILOT_TYPES[pilot.type].label}</span></span>
+          <span data-pilot-radius-label="${id}" class="shrink-0 ${custom ? 'font-semibold text-aeris' : 'text-notion-500'}">${formatRadius(pilot.radius)}</span>
+        </button>
+        <button type="button" data-remove-pilot="${id}" title="Supprimer ce TP" aria-label="Supprimer ${escapeHtml(pilot.name)}" class="pilot-remove mr-1 rounded p-1.5 text-notion-400 hover:bg-red-50 hover:text-red-600">×</button>
+      </div>
+      ${open ? pilotEditorComponent(pilot) : ''}
+    </li>`;
+}
+
+function pilotEditorComponent(pilot) {
+  const inputClass = 'mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs text-notion-900 outline-none focus:border-gendarmerie-blue';
+  return `
+    <div data-pilot-editor="${escapeHtml(pilot.id)}" class="space-y-2 px-2.5 pb-2.5 pt-1">
+      <div class="grid grid-cols-[1fr_5.5rem] gap-2">
+        <label class="text-[10px] text-notion-500">Nom
+          <input id="pilot-name-input" type="text" maxlength="${MAX_NAME_LENGTH}" value="${escapeHtml(pilot.name)}" class="${inputClass}" />
+        </label>
+        <label class="text-[10px] text-notion-500">Identifiant
+          <input id="pilot-id-input" type="text" maxlength="${MAX_ID_LENGTH}" value="${escapeHtml(pilot.id)}" class="${inputClass}" />
+        </label>
+      </div>
+      <label class="block text-[10px] text-notion-500">
+        <span class="flex justify-between"><span>Rayon de couverture</span><strong id="pilot-radius-value" class="font-semibold text-aeris">${formatRadius(pilot.radius)}</strong></span>
+        <input id="pilot-radius-slider" type="range" min="${MIN_RADIUS}" max="${pilot.defaultRadius}" step="${RADIUS_STEP}" value="${pilot.radius}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
+      </label>
+      <p id="pilot-error" class="hidden rounded bg-red-50 px-2 py-1.5 text-[10px] leading-4 text-red-600"></p>
+      <div class="grid grid-cols-2 gap-2">
+        <button id="pilot-cancel" type="button" class="rounded-md border border-notion-200 px-2 py-1.5 text-[10px] font-semibold text-notion-600 hover:bg-notion-100">Fermer</button>
+        <button id="pilot-save" type="button" title="Valider (Entrée)" class="rounded-md bg-gendarmerie-blue px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-gendarmerie-navy">✓ Valider</button>
+      </div>
+    </div>`;
 }
 
 function placementResultComponent(hasProtectedArea) {

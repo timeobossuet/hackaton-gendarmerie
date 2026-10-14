@@ -60,6 +60,7 @@ export const state = {
   planning: missions[0].planning,
   zoomSensitivity: MAP_CONFIG.defaultZoomSensitivity,
   zoomSettingsOpen: false,
+  selectedPilotId: null,
   weather: missions[0].weather
 };
 
