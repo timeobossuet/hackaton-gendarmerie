@@ -1,7 +1,10 @@
 import { MAP_CONFIG } from './config.js';
 import { droneModels, state } from './state.js';
 import { componentIcon } from './icons.js';
-import { getLeafletMap } from './map.js';
+import {
+  MIN_RADIUS, RADIUS_STEP, MAX_PILOTS, MAX_NAME_LENGTH, MAX_ID_LENGTH,
+  assignedDroneCount, availableDroneCount, formatRadius, getPilotModel, hasCustomRadius, isPlacementStale
+} from './planning/fleet.js';
 
 export function appShell() {
   return `
@@ -93,7 +96,7 @@ function droneSettingsComponent() {
         <div>
           <div class="text-[10px] font-bold uppercase tracking-widest text-gendarmerie-beige">Configuration</div>
           <h2 class="mt-1 text-base font-semibold">Modèles de drones</h2>
-          <p class="mt-1 text-xs leading-4 text-white/65">Consultez les capacités disponibles et affectez un modèle à chaque rayon de couverture.</p>
+          <p class="mt-1 text-xs leading-4 text-white/65">Consultez les capacités, gérez le stock et attribuez un modèle à chaque télépilote.</p>
         </div>
         <button id="drone-settings-close" title="Fermer la gestion des drones" type="button" class="rounded-md border border-white/20 p-2 text-white/75 hover:bg-white/10 hover:text-white">${componentIcon('close', 'h-5 w-5')}</button>
       </div>
@@ -221,18 +224,31 @@ function leftPanelComponent() {
         </section>
       </details>
       <details open class="group border-t border-notion-200 pt-3">
-        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>3. Modifier les TP</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
+        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>3. Stock et télépilotes</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
         <section class="pt-2">
         <div class="mb-3 flex items-center justify-between">
-          <span class="text-[10px] text-notion-400">${Object.values(state.planning.fleet || {}).reduce((total, count) => total + Number(count || 0), 0)} drones</span>
+          <span class="text-[10px] font-semibold text-notion-700">Stock de drones</span>
+          <span class="text-[10px] text-notion-400">${Object.values(state.planning.droneStock ?? {}).reduce((total, count) => total + Number(count || 0), 0)} drones</span>
         </div>
-        <div class="grid gap-2 sm:grid-cols-2">
+        <div class="mb-3 grid gap-2 sm:grid-cols-2">
           ${droneModels.map((drone) => `
             <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">
-              <span class="flex items-center justify-between gap-2"><span class="truncate">${escapeHtml(drone.model)}</span><span class="text-[9px] text-notion-400">${drone.maxRange} m</span></span>
-              <input class="drone-count mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" data-drone-id="${drone.id}" type="number" min="0" max="30" value="${state.planning.fleet?.[drone.id] || 0}" aria-label="Nombre de ${escapeHtml(drone.model)}" />
+              <span class="flex items-center justify-between gap-2"><span class="truncate">${escapeHtml(drone.model)}</span><span class="text-[9px] text-notion-400">${formatRadius(drone.maxRange)}</span></span>
+              <input class="drone-count mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" data-drone-id="${escapeHtml(drone.id)}" type="number" min="${assignedDroneCount(drone.id)}" max="30" value="${state.planning.droneStock?.[drone.id] ?? 0}" aria-label="Nombre de ${escapeHtml(drone.model)}" />
+              <span class="mt-1 block text-[9px] text-notion-400">${assignedDroneCount(drone.id)} affecté(s) · ${availableDroneCount(drone.id)} disponible(s)</span>
             </label>
           `).join('')}
+        </div>
+        ${fleetListComponent()}
+        <div class="mt-3 rounded-md border border-notion-200 bg-notion-50 p-2.5">
+          <label class="block text-[10px] text-gray-500"><span class="flex justify-between"><span>Avancée de l’opération</span><strong id="operation-progress-value" class="font-semibold text-notion-800">${state.planning.operationProgress}%</strong></span>
+            <input id="operation-progress" type="range" min="0" max="100" step="5" value="${state.planning.operationProgress}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
+          </label>
+          <label class="mt-2 flex items-center gap-2 text-[10px] text-notion-600">
+            <input id="move-team-with-drone" type="checkbox" class="accent-gendarmerie-blue" ${state.planning.moveTeamWithDrone ? 'checked' : ''} />
+            Minimiser les déplacements des équipes
+          </label>
+          <p class="mt-1 text-[9px] leading-4 text-notion-400">Le calcul privilégie les positions existantes tant que le gain de couverture ne justifie pas un déplacement.</p>
         </div>
         <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Importance du chemin</span><strong id="path-weight-value" class="font-semibold text-notion-800">${state.planning.pathWeight}</strong></span>
           <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
@@ -254,6 +270,82 @@ function leftPanelComponent() {
   return panelFrame({ side: 'left', eyebrow: 'Configuration', title: 'Préparer la mission', content, open: state.leftMenuOpen });
 }
 
+function fleetListComponent() {
+  const fleet = state.planning.fleet ?? [];
+  const customCount = fleet.filter(hasCustomRadius).length;
+  const full = fleet.length >= MAX_PILOTS;
+  const addClass = 'add-pilot rounded-md border border-dashed border-gendarmerie-beige px-2 py-1.5 text-[10px] font-semibold text-notion-700 transition hover:border-gendarmerie-blue hover:bg-gendarmerie-beige/30 disabled:cursor-not-allowed disabled:opacity-50';
+  const models = droneModels.map((model) => {
+    const available = availableDroneCount(model.id);
+    return `<button type="button" data-add-pilot="${escapeHtml(model.id)}" class="${addClass}" ${full || available <= 0 ? 'disabled' : ''} title="${available} drone(s) disponible(s)">+ ${escapeHtml(model.model)} (${available})</button>`;
+  }).join('');
+  return `
+    <div class="rounded-md border border-notion-200">
+      <div class="flex items-center justify-between border-b border-notion-200 px-2.5 py-2">
+        <span class="text-[10px] font-semibold text-notion-700">Télépilotes (${fleet.length})</span>
+        ${customCount ? `<button id="reset-radii" type="button" class="text-[10px] font-semibold text-aeris hover:underline">Rayons par défaut</button>` : ''}
+      </div>
+      ${fleet.length
+        ? `<ul class="max-h-72 divide-y divide-notion-100 overflow-y-auto">${fleet.map(pilotRowComponent).join('')}</ul>`
+        : `<p class="px-2.5 py-3 text-[10px] leading-4 text-notion-400">Aucun télépilote affecté. Ajoutez-en depuis le stock disponible.</p>`}
+      ${state.planning.fleetError ? `<p class="border-t border-red-100 bg-red-50 px-2.5 py-2 text-[10px] text-red-600">${escapeHtml(state.planning.fleetError)}</p>` : ''}
+      <div class="grid grid-cols-2 gap-2 border-t border-notion-100 p-2">${models}</div>
+      <p class="border-t border-notion-100 px-2.5 py-2 text-[10px] leading-4 text-notion-400">Cliquez sur un télépilote pour modifier ses informations. Son rayon ne peut pas dépasser la portée du drone affecté.${full ? ` Maximum : ${MAX_PILOTS} télépilotes.` : ''}</p>
+    </div>
+  `;
+}
+
+function pilotRowComponent(pilot) {
+  const open = state.selectedPilotId === pilot.id;
+  const custom = hasCustomRadius(pilot);
+  const id = escapeHtml(pilot.id);
+  const model = getPilotModel(pilot);
+  return `
+    <li class="text-[10px] ${open ? 'bg-gendarmerie-beige/20' : ''}">
+      <div class="flex items-center">
+        <button type="button" data-pilot-toggle="${id}" aria-expanded="${open}" class="pilot-toggle flex min-w-0 flex-1 items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-notion-100">
+          <span class="min-w-0 truncate"><span class="font-semibold text-notion-800">${escapeHtml(pilot.name)}</span> <span class="text-notion-400">${id} · ${escapeHtml(model?.model ?? 'Drone indisponible')}</span></span>
+          <span data-pilot-radius-label="${id}" class="shrink-0 ${custom ? 'font-semibold text-aeris' : 'text-notion-500'}">${formatRadius(pilot.radius)}</span>
+        </button>
+        <button type="button" data-remove-pilot="${id}" title="Supprimer ce TP" aria-label="Supprimer ${escapeHtml(pilot.name)}" class="pilot-remove mr-1 rounded p-1.5 text-notion-400 hover:bg-red-50 hover:text-red-600">×</button>
+      </div>
+      ${open ? pilotEditorComponent(pilot) : ''}
+    </li>`;
+}
+
+function pilotEditorComponent(pilot) {
+  const inputClass = 'mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs text-notion-900 outline-none focus:border-gendarmerie-blue';
+  const modelOptions = droneModels.map((model) => {
+    const assigned = assignedDroneCount(model.id);
+    const count = state.planning.droneStock?.[model.id] ?? 0;
+    const disabled = model.id !== pilot.droneModelId && assigned >= count;
+    return `<option value="${escapeHtml(model.id)}" ${model.id === pilot.droneModelId ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${escapeHtml(model.model)} — ${formatRadius(model.maxRange)} (${Math.max(0, count - assigned)} disponible(s))</option>`;
+  }).join('');
+  return `
+    <div data-pilot-editor="${escapeHtml(pilot.id)}" class="space-y-2 px-2.5 pb-2.5 pt-1">
+      <div class="grid grid-cols-[1fr_5.5rem] gap-2">
+        <label class="text-[10px] text-notion-500">Nom
+          <input id="pilot-name-input" type="text" maxlength="${MAX_NAME_LENGTH}" value="${escapeHtml(pilot.name)}" class="${inputClass}" />
+        </label>
+        <label class="text-[10px] text-notion-500">Identifiant
+          <input id="pilot-id-input" type="text" maxlength="${MAX_ID_LENGTH}" value="${escapeHtml(pilot.id)}" class="${inputClass}" />
+        </label>
+      </div>
+      <label class="block text-[10px] text-notion-500">Drone affecté
+        <select id="pilot-model-input" class="${inputClass}">${modelOptions}</select>
+      </label>
+      <label class="block text-[10px] text-notion-500">
+        <span class="flex justify-between"><span>Rayon de couverture (max. ${formatRadius(getPilotModel(pilot)?.maxRange ?? pilot.defaultRadius)})</span><strong id="pilot-radius-value" class="font-semibold text-aeris">${formatRadius(pilot.radius)}</strong></span>
+        <input id="pilot-radius-slider" type="range" min="${MIN_RADIUS}" max="${getPilotModel(pilot)?.maxRange ?? pilot.defaultRadius}" step="${RADIUS_STEP}" value="${pilot.radius}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
+      </label>
+      <p id="pilot-error" class="hidden rounded bg-red-50 px-2 py-1.5 text-[10px] leading-4 text-red-600"></p>
+      <div class="grid grid-cols-2 gap-2">
+        <button id="pilot-cancel" type="button" class="rounded-md border border-notion-200 px-2 py-1.5 text-[10px] font-semibold text-notion-600 hover:bg-notion-100">Fermer</button>
+        <button id="pilot-save" type="button" title="Valider (Entrée)" class="rounded-md bg-gendarmerie-blue px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-gendarmerie-navy">✓ Valider</button>
+      </div>
+    </div>`;
+}
+
 function placementResultComponent(hasProtectedArea) {
   if (state.planning.placementError) {
     return `<div class="mt-3 rounded-md bg-red-50 px-2.5 py-2 text-[10px] leading-4 text-red-600">${state.planning.placementError}</div>`;
@@ -270,7 +362,9 @@ function placementResultComponent(hasProtectedArea) {
         <span>Zone couverte</span><strong class="text-right">${percent(result.stats.buffer ?? result.stats.poly)}</strong>
         <span>Zones de chevauchement</span><strong class="text-right">${result.collisions.pairs}</strong>
         <span>Collision max.</span><strong class="text-right">${result.collisions.percent ?? 0}%</strong>
+        ${state.planning.moveTeamWithDrone ? `<span>Équipes déplacées</span><strong class="text-right">${result.movedPilots ?? 0}</strong>` : ''}
       </div>
+        ${isPlacementStale() ? `<div class="mt-2 rounded bg-amber-50 px-2 py-1.5 text-amber-700">La flotte ou les paramètres ont changé depuis le dernier calcul : relancez le placement.</div>` : ''}
     </div>
   `;
 }
@@ -299,6 +393,13 @@ function rightPanelComponent() {
           ${state.weather.error || (state.weather.scanning ? `Scan météo en cours... ${state.weather.progress}%` : '')}
         </div>
       </section>
+      <section class="border-t border-notion-200 pt-4">
+        <h2 class="mb-2 text-xs font-semibold">Fond de carte</h2>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="map-style-osm" type="button" class="rounded-md border px-2 py-2 text-[10px] font-medium transition ${state.mapStyle === 'osm' ? 'border-gendarmerie-blue bg-gendarmerie-blue text-white' : 'border-notion-200 bg-notion-50 text-notion-700 hover:bg-notion-100'}">Plan 2D</button>
+          <button id="map-style-satellite" type="button" class="rounded-md border px-2 py-2 text-[10px] font-medium transition ${state.mapStyle === 'satellite' ? 'border-gendarmerie-blue bg-gendarmerie-blue text-white' : 'border-notion-200 bg-notion-50 text-notion-700 hover:bg-notion-100'}">Satellite</button>
+        </div>
+      </section>
       <button title="Imprimer la carte" type="button" class="export-map flex w-full items-center justify-center gap-2 rounded-md border border-gendarmerie-beige px-3 py-2 text-xs font-medium text-gendarmerie-blue transition hover:bg-gendarmerie-beige/40">
         ${componentIcon('printer', 'h-4 w-4')} Imprimer la carte
       </button>
@@ -309,6 +410,8 @@ function rightPanelComponent() {
 }
 
 function mapComponent() {
+  const mapAttribution = state.mapStyle === 'satellite' ? '© Esri • © OpenStreetMap contributors' : '© OpenStreetMap contributors';
+
   return `
     <div id="map" class="relative h-full w-full select-none overflow-hidden bg-[#dfe9d8]">
       <div id="map-hint" class="pointer-events-none absolute left-1/2 top-1/2 z-[1] hidden -translate-x-1/2 -translate-y-1/2 rounded-lg border border-gendarmerie-blue/30 bg-white/95 px-4 py-3 text-center shadow-panel">
@@ -316,7 +419,7 @@ function mapComponent() {
         <div class="mt-1 text-[10px] text-notion-500">${state.drawingPolygon ? 'Cliquez sur la carte pour ajouter des points' : (state.planning.gpxGeoJson ? 'La carte est centrée sur le chemin' : 'Importez un chemin GPX')}</div>
       </div>
       ${!state.planning.gpxGeoJson && !state.polygonAdded ? `<div class="pointer-events-none absolute left-1/2 top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 text-center"><div class="rounded-xl border border-notion-200 bg-white/90 px-6 py-5 shadow-panel backdrop-blur"><div class="text-sm font-semibold text-notion-900">Votre mission commence ici</div><div class="mt-1 text-xs text-gray-500">Ajoutez un fichier GPX ou dessinez une zone protégée.</div></div></div>` : ''}
-      <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">© OpenStreetMap contributors</div>
+      <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">${mapAttribution}</div>
     </div>
   `;
 }

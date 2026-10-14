@@ -1,5 +1,5 @@
 import { MAP_CONFIG, SELECTORS } from './config.js';
-import { activateMission, addDroneModel, addMission, droneModels, persistMissions, removeActiveMission, removeDroneModel, renameMission, state, updateDroneModel as updateDroneModelCatalog } from './state.js';
+import { activateMission, addDroneModel, addMission, droneModels, persistMissions, removeActiveMission, removeDroneModel, renameMission, saveActiveMission, state, updateDroneModel as updateDroneModelCatalog } from './state.js';
 import { $ } from './dom.js';
 import {
   bindMapDrawing,
@@ -7,6 +7,7 @@ import {
   centerMapOnPolygon,
   initializeMap,
   renderMissionPolygon,
+  setMapStyle,
   zoomBy
 } from './map.js';
 import {
@@ -19,11 +20,21 @@ import { parseGpx } from './planning/gpx.js';
 import { fitMapToGpx, renderPlanningArea } from './planning/area.js';
 import { calculatePlacement, clearPlacement } from './planning/placement.js';
 import { getLeafletMap } from './map.js';
+import { assignedDroneCount, resetPilotRadii, syncFleet } from './planning/fleet.js';
+import { configureRadiusEditor, syncCircleRadii } from './planning/radius-editor.js';
+import { bindFleetPanel } from './planning/fleet-panel.js';
+
+let initialPlacementRestored = false;
 
 export function bindEvents({ render }) {
   initializeMap();
   bindMapInteractions();
   renderPlanningArea();
+  syncFleet();
+  configureRadiusEditor({
+    onRadiusCommit: () => render(),
+    onRecalculate: () => optimizePlacement(render)
+  });
   initializeWeatherLayer();
   setWeatherVisibility(state.weatherVisible);
 
@@ -56,7 +67,7 @@ export function bindEvents({ render }) {
     state.droneSettingsOpen = false;
     render();
   });
-  document.querySelectorAll('.drone-count').forEach((input) => input.addEventListener('input', updateDroneCount));
+  document.querySelectorAll('.drone-count').forEach((input) => input.addEventListener('change', (event) => updateDroneCount(event, render)));
   document.querySelectorAll('.drone-model-form').forEach((form) => form.addEventListener('submit', (event) => saveDroneModel(event, render)));
   document.querySelectorAll('[data-delete-drone]').forEach((button) => button.addEventListener('click', () => deleteDroneModel(button.dataset.deleteDrone, render)));
   $('#add-drone-model')?.addEventListener('submit', (event) => addNewDroneModel(event, render));
@@ -85,25 +96,50 @@ export function bindEvents({ render }) {
     state.planning.areaMode = 'buffer';
     state.drawingPolygon = false;
     renderPlanningArea();
+    persistMissions();
     render();
   });
   $('#area-polygon')?.addEventListener('click', () => {
     state.planning.areaMode = 'polygon';
+    persistMissions();
     render();
   });
   $('#buffer-slider')?.addEventListener('input', updateBuffer);
+  $('#buffer-slider')?.addEventListener('change', persistMissions);
   $('#max-collision-input')?.addEventListener('input', updateMaxCollisionPercent);
   $('#add-zone')?.addEventListener('click', () => {
     state.drawingPolygon = true;
     state.polygonPoints = [];
     state.polygonAdded = false;
+    saveActiveMission();
     render();
     $(SELECTORS.mapHint).classList.remove('hidden');
     bindMapDrawing();
   });
   $(SELECTORS.finishZone)?.addEventListener('click', () => finishPolygon(render));
+  bindFleetPanel({ render });
+
+  $('#reset-radii')?.addEventListener('click', () => {
+    resetPilotRadii();
+    syncCircleRadii();
+    persistMissions();
+    render();
+  });
+  $('#operation-progress')?.addEventListener('input', (event) => {
+    state.planning.operationProgress = Math.max(0, Math.min(100, Number(event.target.value) || 0));
+    $('#operation-progress-value').textContent = `${state.planning.operationProgress}%`;
+    if (state.planning.placement) state.planning.placement.stale = true;
+  });
+  $('#operation-progress')?.addEventListener('change', persistMissions);
+  $('#move-team-with-drone')?.addEventListener('change', (event) => {
+    state.planning.moveTeamWithDrone = event.target.checked;
+    if (state.planning.placement) state.planning.placement.stale = true;
+    persistMissions();
+  });
   $('#path-weight').addEventListener('input', updatePlacementWeight);
   $('#area-weight').addEventListener('input', updatePlacementWeight);
+  $('#path-weight').addEventListener('change', persistMissions);
+  $('#area-weight').addEventListener('change', persistMissions);
   $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
   $('#weather-toggle').addEventListener('click', () => {
     state.weatherVisible = !state.weatherVisible;
@@ -115,8 +151,29 @@ export function bindEvents({ render }) {
   $('#zoom-out').addEventListener('click', () => zoomBy(-state.zoomSensitivity));
   $('#zoom-settings')?.addEventListener('click', () => toggleZoomSettings(render));
   $('#zoom-sensitivity')?.addEventListener('input', updateZoomSensitivity);
+  $('#map-style-osm')?.addEventListener('click', () => {
+    setMapStyle('osm');
+    render();
+  });
+  $('#map-style-satellite')?.addEventListener('click', () => {
+    setMapStyle('satellite');
+    render();
+  });
   $('#weather-scan').addEventListener('click', scanFromControls);
   bindPanelDragging();
+
+  if (!initialPlacementRestored) {
+    initialPlacementRestored = true;
+    if (state.planning.placement) {
+      try {
+        calculatePlacement();
+      } catch (error) {
+        state.planning.placementError = error.message;
+        persistMissions();
+      }
+      render();
+    }
+  }
 }
 
 function readDroneForm(form) {
@@ -133,8 +190,8 @@ function readDroneForm(form) {
 }
 
 function validateDroneModel(model) {
-  if (!model.model || !Number.isFinite(model.maxWindSpeed) || !Number.isFinite(model.maxZoom) || !Number.isFinite(model.maxRange) || model.maxRange <= 0) {
-    throw new Error('Renseignez un nom et des caractéristiques numériques valides.');
+  if (!model.model || !Number.isFinite(model.maxWindSpeed) || !Number.isFinite(model.maxZoom) || !Number.isFinite(model.maxRange) || model.maxRange < 200) {
+    throw new Error('Renseignez un nom et des caractéristiques numériques valides. La portée doit être d’au moins 200 m.');
   }
 }
 
@@ -169,7 +226,9 @@ function addNewDroneModel(event, render) {
 
 function deleteDroneModel(id, render) {
   if (!removeDroneModel(id)) {
-    showMapHint('Conservez au moins un modèle de drone.');
+    showMapHint(droneModels.length <= 1
+      ? 'Conservez au moins un modèle de drone.'
+      : 'Retirez les drones du stock et réaffectez les télépilotes avant de supprimer ce modèle.');
     return;
   }
   render();
@@ -216,11 +275,13 @@ function updateBuffer(event) {
   state.planning.bufferMeters = Number(event.target.value);
   $('#buffer-value').textContent = `${state.planning.bufferMeters} m`;
   renderPlanningArea();
+  if (state.planning.placement) state.planning.placement.stale = true;
 }
 
 function updateMaxCollisionPercent(event) {
   const value = event.target.value.trim();
   state.planning.maxCollisionPercent = value === '' ? '' : Number(value);
+  if (state.planning.placement) state.planning.placement.stale = true;
   persistMissions();
 }
 
@@ -234,19 +295,16 @@ function updateZoomSensitivity(event) {
   $('#zoom-sensitivity-value').textContent = `${event.target.value}%`;
 }
 
-function updateDroneOptions(event) {
-  state.planning[event.target.id === 'small-drones' ? 'smallDrones' : 'largeDrones'] = Math.max(0, Math.min(30, Number(event.target.value) || 0));
-}
-
-function updateDroneCount(event) {
-  state.planning.fleet[event.target.dataset.droneId] = Math.max(0, Math.min(30, Number(event.target.value) || 0));
-  persistMissions();
-}
-
-
-function updateDroneModel(event) {
-  const key = event.target.id === 'small-drone-model' ? 'smallDroneModelId' : 'largeDroneModelId';
-  state.planning[key] = event.target.value;
+function updateDroneCount(event, render) {
+  const { droneId } = event.target.dataset;
+  const value = Number(event.target.value);
+  const minimum = assignedDroneCount(droneId);
+  if (!Number.isInteger(value) || value < minimum || value > 30) {
+    showMapHint(`Le stock doit être un nombre entier compris entre ${minimum} et 30.`);
+    event.target.value = state.planning.droneStock?.[droneId] ?? minimum;
+    return;
+  }
+  state.planning.droneStock[droneId] = value;
   persistMissions();
   render();
 }
@@ -255,6 +313,7 @@ function updatePlacementWeight(event) {
   const key = event.target.id === 'path-weight' ? 'pathWeight' : 'areaWeight';
   state.planning[key] = Number(event.target.value);
   $(`#${key.replace('Weight', '-weight-value')}`).textContent = event.target.value;
+  if (state.planning.placement) state.planning.placement.stale = true;
 }
 
 async function optimizePlacement(render) {
@@ -273,6 +332,7 @@ async function optimizePlacement(render) {
 }
 
 function refreshMissionView() {
+  state.selectedPilotId = null;
   cancelWeatherScan();
   state.drawingPolygon = false;
   const map = getLeafletMap();
@@ -283,8 +343,9 @@ function refreshMissionView() {
   if (state.planning.placement) {
     try {
       calculatePlacement();
-    } catch {
+    } catch (error) {
       state.planning.placement = null;
+      state.planning.placementError = error.message;
     }
   }
 }
@@ -353,6 +414,7 @@ async function loadGpx(event, render) {
     state.polygonPoints = [];
     state.polygonAdded = false;
     state.drawingPolygon = false;
+    saveActiveMission();
     renderPlanningArea();
     fitMapToGpx();
     render();
@@ -381,6 +443,7 @@ function finishPolygon(render) {
 
   state.drawingPolygon = false;
   state.polygonAdded = true;
+  saveActiveMission();
   render();
   renderPlanningArea();
   renderMissionPolygon();
