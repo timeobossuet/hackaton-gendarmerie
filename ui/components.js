@@ -1,5 +1,5 @@
 import { MAP_CONFIG } from './config.js';
-import { state } from './state.js';
+import { droneModels, state } from './state.js';
 import { componentIcon } from './icons.js';
 import { getLeafletMap } from './map.js';
 
@@ -7,7 +7,10 @@ export function appShell() {
   return `
     <main class="relative h-full w-full">
       ${mapComponent()}
+      ${mapControlsComponent()}
       ${topbarComponent()}
+      ${state.droneSettingsOpen ? droneSettingsComponent() : ''}
+      ${rightPanelToggleComponent()}
       ${leftPanelComponent()}
       ${rightPanelComponent()}
     </main>
@@ -38,7 +41,7 @@ function topbarComponent() {
 
       <div class="flex items-center gap-2">
         <span class="hidden text-[10px] text-white/60 sm:inline">${state.planning.gpxFileName ? 'Mission en cours' : 'Nouvelle mission'}</span>
-        <button id="export-map" title="Exporter la carte" type="button" class="flex items-center gap-2 rounded-md border border-white/20 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white">
+        <button id="export-map" title="Exporter la carte" type="button" class="export-map flex items-center gap-2 rounded-md border border-white/20 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white">
           ${componentIcon('download', 'h-4 w-4')}
           <span>Exporter</span>
         </button>
@@ -49,6 +52,9 @@ function topbarComponent() {
         <button id="toggle-right" title="Ouvrir ou fermer les options de la carte" type="button" class="flex items-center gap-2 rounded-md border border-white/20 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white">
           ${componentIcon(state.rightMenuOpen ? 'close' : 'layers', 'h-4 w-4')}
           <span>Meteo</span>
+        </button>
+        <button id="drone-settings-toggle" aria-expanded="${state.droneSettingsOpen}" title="Gérer les modèles de drones" type="button" class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-white/20 p-0 text-white/75 transition hover:bg-white/10 hover:text-white ${state.droneSettingsOpen ? 'bg-white/15 text-white' : ''}">
+          ${componentIcon('settings', 'h-4 w-4')}
         </button>
       </div>
       ${state.missionMenuOpen ? missionMenuComponent() : ''}
@@ -80,6 +86,70 @@ function missionMenuComponent() {
   `;
 }
 
+function droneSettingsComponent() {
+  return `
+    <div class="fixed inset-0 z-[3000] flex min-h-screen flex-col bg-white text-gendarmerie-navy">
+      <div class="flex shrink-0 items-center justify-between border-b border-gendarmerie-beige bg-gendarmerie-navy px-5 py-4 text-white shadow-panel sm:px-8">
+        <div>
+          <div class="text-[10px] font-bold uppercase tracking-widest text-gendarmerie-beige">Configuration</div>
+          <h2 class="mt-1 text-base font-semibold">Modèles de drones</h2>
+          <p class="mt-1 text-xs leading-4 text-white/65">Consultez les capacités disponibles et affectez un modèle à chaque rayon de couverture.</p>
+        </div>
+        <button id="drone-settings-close" title="Fermer la gestion des drones" type="button" class="rounded-md border border-white/20 p-2 text-white/75 hover:bg-white/10 hover:text-white">${componentIcon('close', 'h-5 w-5')}</button>
+      </div>
+      <div class="flex-1 overflow-y-auto bg-notion-50 px-5 py-6 sm:px-8">
+        <div class="mx-auto grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        ${droneModels.map((drone) => `
+          <article class="rounded-lg border border-notion-200 bg-white p-4 shadow-sm">
+            <div class="flex items-start justify-between gap-2">
+              <h3 class="text-xs font-semibold">${escapeHtml(drone.model)}</h3>
+            </div>
+            <form class="drone-model-form mt-3 space-y-2" data-drone-id="${drone.id}">
+              <input name="model" required value="${escapeHtml(drone.model)}" class="w-full rounded border border-notion-200 px-2 py-1.5 text-xs" aria-label="Nom du modèle" />
+              <div class="grid grid-cols-2 gap-2">
+                ${droneNumberInput('maxWindSpeed', 'Vent max (km/h)', drone.maxWindSpeed)}
+                ${droneNumberInput('maxZoom', 'Zoom max', drone.maxZoom)}
+                ${droneNumberInput('maxRange', 'Portée (m)', drone.maxRange)}
+              </div>
+              <div class="grid grid-cols-3 gap-1 text-[10px] text-notion-700">
+                ${droneBooleanInput('thermalVision', 'Thermique', drone.thermalVision)}
+                ${droneBooleanInput('nightVision', 'Nocturne', drone.nightVision)}
+                ${droneBooleanInput('rainTolerance', 'Pluie', drone.rainTolerance)}
+              </div>
+              <div class="flex gap-2 pt-1">
+                <button type="submit" class="flex-1 rounded bg-gendarmerie-blue px-2 py-1.5 text-[10px] font-semibold text-white hover:bg-blue-800">Enregistrer</button>
+                <button type="button" data-delete-drone="${drone.id}" class="rounded border border-red-200 px-2 py-1.5 text-[10px] text-red-700 hover:bg-red-50">Supprimer</button>
+              </div>
+            </form>
+          </article>
+        `).join('')}
+        </div>
+        <form id="add-drone-model" class="mx-auto mt-6 max-w-5xl rounded-lg border border-dashed border-gendarmerie-beige bg-white p-4">
+          <h3 class="text-xs font-semibold">Ajouter un modèle</h3>
+          <div class="mt-3 grid gap-2 sm:grid-cols-4">
+            <input name="model" required placeholder="Nom du modèle" class="rounded border border-notion-200 px-2 py-1.5 text-xs" />
+            ${droneNumberInput('maxWindSpeed', 'Vent max (km/h)', '', true)}
+            ${droneNumberInput('maxZoom', 'Zoom max', '', true)}
+            ${droneNumberInput('maxRange', 'Portée (m)', '', true)}
+          </div>
+          <div class="mt-2 flex items-center justify-between">
+            <p class="text-[10px] text-notion-500">Les capacités optionnelles sont désactivées par défaut.</p>
+            <button type="submit" class="rounded bg-gendarmerie-blue px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800">Ajouter le modèle</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function droneNumberInput(name, label, value, compact = false) {
+  return `<label class="${compact ? '' : 'col-span-2'} text-[10px] text-notion-700">${label}<input name="${name}" type="number" min="0" required value="${value}" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs" /></label>`;
+}
+
+function droneBooleanInput(name, label, checked) {
+  return `<label class="flex items-center gap-1"><input name="${name}" type="checkbox" ${checked ? 'checked' : ''} />${label}</label>`;
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -87,14 +157,22 @@ function escapeHtml(value) {
 }
 
 function panelFrame({ side, title, eyebrow, content, open }) {
-  const position = side === 'left' ? 'left-4' : 'right-4';
+  const position = state.panelPositions[side];
+  const defaultPosition = side === 'left' ? 'left: 1rem;' : 'right: 1rem;';
+  const positionStyle = position
+    ? `left: ${position.x}px; top: ${position.y}px; right: auto;`
+    : `${defaultPosition} top: 4rem;`;
   const hiddenPosition = side === 'left' ? '-translate-x-[calc(100%+1rem)]' : 'translate-x-[calc(100%+1rem)]';
 
   return `
-    <aside class="absolute ${position} top-16 z-[2000] w-[calc(100vw-2rem)] max-w-[300px] rounded-lg border border-notion-200 bg-white/95 shadow-panel backdrop-blur transition-all duration-200${open ? 'translate-x-0 opacity-100' : `${hiddenPosition} pointer-events-none opacity-0`} print:hidden">
-      <div class="border-b border-notion-200 px-4 py-3">
+    <aside id="${side}-panel" data-panel-side="${side}" style="${positionStyle}" class="absolute z-[2000] w-[calc(100vw-2rem)] max-w-[300px] rounded-lg border border-notion-200 bg-white/95 shadow-panel backdrop-blur transition-all duration-200 ${open ? 'translate-x-0 opacity-100' : `${hiddenPosition} pointer-events-none opacity-0`} print:hidden">
+      <div data-panel-drag-handle class="flex cursor-move items-start justify-between gap-3 border-b border-notion-200 px-4 py-3">
+        <div>
         <div class="text-[10px] font-bold uppercase tracking-widest text-gendarmerie-blue">${eyebrow}</div>
         <h1 class="mt-1 text-sm font-semibold">${title}</h1>
+        ${side === 'left' ? `<p class="mt-1 text-[10px] leading-4 text-notion-500">1. Définissez la zone · 2. Placez les drones</p>` : ''}
+        </div>
+        ${side === 'right' ? `<button id="minimize-right" title="Réduire les options de la carte" type="button" class="shrink-0 rounded-md p-1 text-notion-500 transition hover:bg-gendarmerie-beige/40 hover:text-gendarmerie-blue">${componentIcon('minimize', 'h-4 w-4')}</button>` : ''}
       </div>
       <div class="max-h-[calc(100vh-10rem)] overflow-y-auto p-4">${content}</div>
     </aside>
@@ -138,7 +216,7 @@ function leftPanelComponent() {
           ${state.drawingPolygon ? `          <button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-gendarmerie-blue px-3 py-2 text-xs font-semibold text-white transition hover:bg-gendarmerie-navy disabled:cursor-not-allowed disabled:opacity-50" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone (${state.polygonPoints.length} points)</button>` : ''}
         `}
         <label class="mt-3 block text-[10px] text-notion-500"> % max de collision
-          <input id="max-collision-input" type="number" min="0" max="100" value="50" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
+          <input id="max-collision-input" type="number" min="0" max="100" value="${state.planning.maxCollisionPercent ?? 50}" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
         </label>
         </section>
       </details>
@@ -146,15 +224,15 @@ function leftPanelComponent() {
         <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>3. Modifier les TP</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
         <section class="pt-2">
         <div class="mb-3 flex items-center justify-between">
-          <span class="text-[10px] text-notion-400">${Number(state.planning.smallDrones) + Number(state.planning.largeDrones)} TP</span>
+          <span class="text-[10px] text-notion-400">${Object.values(state.planning.fleet || {}).reduce((total, count) => total + Number(count || 0), 0)} drones</span>
         </div>
-        <div class="grid grid-cols-2 gap-2">
-          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">TP de 1 km
-            <input id="small-drones" type="number" min="0" max="30" value="${state.planning.smallDrones}" class="mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
-          </label>
-          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">TP de 2 km
-            <input id="large-drones" type="number" min="0" max="30" value="${state.planning.largeDrones}" class="mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
-          </label>
+        <div class="grid gap-2 sm:grid-cols-2">
+          ${droneModels.map((drone) => `
+            <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">
+              <span class="flex items-center justify-between gap-2"><span class="truncate">${escapeHtml(drone.model)}</span><span class="text-[9px] text-notion-400">${drone.maxRange} m</span></span>
+              <input class="drone-count mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" data-drone-id="${drone.id}" type="number" min="0" max="30" value="${state.planning.fleet?.[drone.id] || 0}" aria-label="Nombre de ${escapeHtml(drone.model)}" />
+            </label>
+          `).join('')}
         </div>
         <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Importance du chemin</span><strong id="path-weight-value" class="font-semibold text-notion-800">${state.planning.pathWeight}</strong></span>
           <input id="path-weight" type="range" min="1" max="100" value="${state.planning.pathWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
@@ -221,6 +299,9 @@ function rightPanelComponent() {
           ${state.weather.error || (state.weather.scanning ? `Scan météo en cours... ${state.weather.progress}%` : '')}
         </div>
       </section>
+      <button title="Imprimer la carte" type="button" class="export-map flex w-full items-center justify-center gap-2 rounded-md border border-gendarmerie-beige px-3 py-2 text-xs font-medium text-gendarmerie-blue transition hover:bg-gendarmerie-beige/40">
+        ${componentIcon('printer', 'h-4 w-4')} Imprimer la carte
+      </button>
     </div>
   `;
 
@@ -235,18 +316,22 @@ function mapComponent() {
         <div class="mt-1 text-[10px] text-notion-500">${state.drawingPolygon ? 'Cliquez sur la carte pour ajouter des points' : (state.planning.gpxGeoJson ? 'La carte est centrée sur le chemin' : 'Importez un chemin GPX')}</div>
       </div>
       ${!state.planning.gpxGeoJson && !state.polygonAdded ? `<div class="pointer-events-none absolute left-1/2 top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 text-center"><div class="rounded-xl border border-notion-200 bg-white/90 px-6 py-5 shadow-panel backdrop-blur"><div class="text-sm font-semibold text-notion-900">Votre mission commence ici</div><div class="mt-1 text-xs text-gray-500">Ajoutez un fichier GPX ou dessinez une zone protégée.</div></div></div>` : ''}
-      <div class="pointer-events-auto absolute bottom-8 right-8 z-[1001] flex items-end gap-2 print:hidden">
-        ${zoomSettingsComponent()}
-        <div class="flex flex-col overflow-hidden rounded-md border border-notion-200 bg-white/90 shadow-panel backdrop-blur">
-          <button id="zoom-in" type="button" aria-label="Zoomer" class="grid h-8 w-8 place-items-center border-b border-notion-200 text-lg text-notion-500 hover:bg-notion-100">+</button>
-          <button id="zoom-out" type="button" aria-label="Dézoomer" class="grid h-8 w-8 place-items-center text-lg text-notion-500 hover:bg-notion-100">−</button>
-        </div>
-      </div>
       <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">© OpenStreetMap contributors</div>
     </div>
   `;
 }
 
+function mapControlsComponent() {
+  return `
+    <div class="pointer-events-auto absolute bottom-8 right-8 z-[1001] flex items-end gap-2 print:hidden">
+      ${zoomSettingsComponent()}
+      <div class="flex flex-col overflow-hidden rounded-md border border-notion-200 bg-white/90 shadow-panel backdrop-blur">
+        <button id="zoom-in" type="button" aria-label="Zoomer" class="grid h-8 w-8 place-items-center border-b border-notion-200 text-lg text-notion-500 hover:bg-notion-100">+</button>
+        <button id="zoom-out" type="button" aria-label="Dézoomer" class="grid h-8 w-8 place-items-center text-lg text-notion-500 hover:bg-notion-100">−</button>
+      </div>
+    </div>
+  `;
+}
 
 function zoomSettingsComponent() {
   return `
@@ -266,4 +351,9 @@ function zoomSettingsComponent() {
       </button>
     </div>
   `;
+}
+
+function rightPanelToggleComponent() {
+  if (state.rightMenuOpen) return '';
+  return `<button id="show-right-panel" title="Afficher les options de la carte" type="button" class="absolute right-5 top-20 z-[2100] grid h-9 w-9 place-items-center rounded-md border border-gendarmerie-beige bg-white/95 text-gendarmerie-blue shadow-panel backdrop-blur transition hover:bg-gendarmerie-beige/50">${componentIcon('layers', 'h-4 w-4')}</button>`;
 }

@@ -1,5 +1,5 @@
 import { MAP_CONFIG, SELECTORS } from './config.js';
-import { activateMission, addMission, persistMissions, removeActiveMission, renameMission, state } from './state.js';
+import { activateMission, addDroneModel, addMission, droneModels, persistMissions, removeActiveMission, removeDroneModel, renameMission, state, updateDroneModel as updateDroneModelCatalog } from './state.js';
 import { $ } from './dom.js';
 import {
   bindMapDrawing,
@@ -31,14 +31,35 @@ export function bindEvents({ render }) {
     state.leftMenuOpen = !state.leftMenuOpen;
     render();
   });
-  $('#toggle-right').addEventListener('click', () => {
+  $('#toggle-right')?.addEventListener('click', () => {
     state.rightMenuOpen = !state.rightMenuOpen;
+    render();
+  });
+  $('#minimize-right')?.addEventListener('click', (event) => {
+    event.stopPropagation();
+    state.rightMenuOpen = false;
+    render();
+  });
+  $('#show-right-panel')?.addEventListener('click', () => {
+    state.rightMenuOpen = true;
     render();
   });
   $('#mission-menu-toggle').addEventListener('click', () => {
     state.missionMenuOpen = !state.missionMenuOpen;
     render();
   });
+  $('#drone-settings-toggle').addEventListener('click', () => {
+    state.droneSettingsOpen = !state.droneSettingsOpen;
+    render();
+  });
+  $('#drone-settings-close')?.addEventListener('click', () => {
+    state.droneSettingsOpen = false;
+    render();
+  });
+  document.querySelectorAll('.drone-count').forEach((input) => input.addEventListener('input', updateDroneCount));
+  document.querySelectorAll('.drone-model-form').forEach((form) => form.addEventListener('submit', (event) => saveDroneModel(event, render)));
+  document.querySelectorAll('[data-delete-drone]').forEach((button) => button.addEventListener('click', () => deleteDroneModel(button.dataset.deleteDrone, render)));
+  $('#add-drone-model')?.addEventListener('submit', (event) => addNewDroneModel(event, render));
   $('#new-mission-top').addEventListener('click', () => createNewMission(render));
   document.querySelectorAll('.mission-select').forEach((button) => {
     button.addEventListener('click', () => switchMission(button.dataset.missionId, render));
@@ -71,6 +92,7 @@ export function bindEvents({ render }) {
     render();
   });
   $('#buffer-slider')?.addEventListener('input', updateBuffer);
+  $('#max-collision-input')?.addEventListener('input', updateMaxCollisionPercent);
   $('#add-zone')?.addEventListener('click', () => {
     state.drawingPolygon = true;
     state.polygonPoints = [];
@@ -80,8 +102,6 @@ export function bindEvents({ render }) {
     bindMapDrawing();
   });
   $(SELECTORS.finishZone)?.addEventListener('click', () => finishPolygon(render));
-  $('#small-drones').addEventListener('input', updateDroneOptions);
-  $('#large-drones').addEventListener('input', updateDroneOptions);
   $('#path-weight').addEventListener('input', updatePlacementWeight);
   $('#area-weight').addEventListener('input', updatePlacementWeight);
   $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
@@ -90,12 +110,118 @@ export function bindEvents({ render }) {
     setWeatherVisibility(state.weatherVisible);
     render();
   });
-  $('#export-map').addEventListener('click', () => window.print());
+  document.querySelectorAll('.export-map').forEach((button) => button.addEventListener('click', () => window.print()));
   $('#zoom-in').addEventListener('click', () => zoomBy(state.zoomSensitivity));
   $('#zoom-out').addEventListener('click', () => zoomBy(-state.zoomSensitivity));
-  $('#zoom-settings').addEventListener('click', () => toggleZoomSettings(render));
+  $('#zoom-settings')?.addEventListener('click', () => toggleZoomSettings(render));
   $('#zoom-sensitivity')?.addEventListener('input', updateZoomSensitivity);
   $('#weather-scan').addEventListener('click', scanFromControls);
+  bindPanelDragging();
+}
+
+function readDroneForm(form) {
+  const data = new FormData(form);
+  return {
+    model: String(data.get('model') || '').trim(),
+    maxWindSpeed: Number(data.get('maxWindSpeed')),
+    maxZoom: Number(data.get('maxZoom')),
+    maxRange: Number(data.get('maxRange')),
+    thermalVision: data.has('thermalVision'),
+    nightVision: data.has('nightVision'),
+    rainTolerance: data.has('rainTolerance')
+  };
+}
+
+function validateDroneModel(model) {
+  if (!model.model || !Number.isFinite(model.maxWindSpeed) || !Number.isFinite(model.maxZoom) || !Number.isFinite(model.maxRange) || model.maxRange <= 0) {
+    throw new Error('Renseignez un nom et des caractéristiques numériques valides.');
+  }
+}
+
+function saveDroneModel(event, render) {
+  event.preventDefault();
+  try {
+    const form = event.currentTarget;
+    const model = readDroneForm(form);
+    validateDroneModel(model);
+    updateDroneModelCatalog(form.dataset.droneId, model);
+    render();
+  } catch (error) {
+    showMapHint(error.message);
+  }
+}
+
+function addNewDroneModel(event, render) {
+  event.preventDefault();
+  try {
+    const model = readDroneForm(event.currentTarget);
+    validateDroneModel(model);
+    const idBase = model.model.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'drone';
+    let id = idBase;
+    let suffix = 2;
+    while (droneModels.some((drone) => drone.id === id)) id = `${idBase}-${suffix++}`;
+    addDroneModel({ id, ...model });
+    render();
+  } catch (error) {
+    showMapHint(error.message);
+  }
+}
+
+function deleteDroneModel(id, render) {
+  if (!removeDroneModel(id)) {
+    showMapHint('Conservez au moins un modèle de drone.');
+    return;
+  }
+  render();
+}
+
+function bindPanelDragging() {
+  document.querySelectorAll('[data-panel-drag-handle]').forEach((handle) => {
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.target.closest('button')) return;
+      const panel = handle.closest('[data-panel-side]');
+      const side = panel?.dataset.panelSide;
+      if (!panel || !side) return;
+
+      const rect = panel.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
+      handle.setPointerCapture(event.pointerId);
+      panel.classList.add('!transition-none');
+
+      const move = (moveEvent) => {
+        const maxX = Math.max(0, window.innerWidth - panel.offsetWidth);
+        const maxY = Math.max(56, window.innerHeight - panel.offsetHeight);
+        const x = Math.min(maxX, Math.max(0, moveEvent.clientX - offsetX));
+        const y = Math.min(maxY, Math.max(56, moveEvent.clientY - offsetY));
+        panel.style.left = `${x}px`;
+        panel.style.top = `${y}px`;
+        panel.style.right = 'auto';
+        state.panelPositions[side] = { x, y };
+      };
+      const stop = () => {
+        panel.classList.remove('!transition-none');
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', stop);
+        handle.removeEventListener('pointercancel', stop);
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', stop);
+      handle.addEventListener('pointercancel', stop);
+    });
+  });
+}
+
+function updateBuffer(event) {
+  state.planning.bufferMeters = Number(event.target.value);
+  $('#buffer-value').textContent = `${state.planning.bufferMeters} m`;
+  renderPlanningArea();
+}
+
+function updateMaxCollisionPercent(event) {
+  const value = event.target.value.trim();
+  state.planning.maxCollisionPercent = value === '' ? '' : Number(value);
+  persistMissions();
 }
 
 function toggleZoomSettings(render) {
@@ -108,14 +234,21 @@ function updateZoomSensitivity(event) {
   $('#zoom-sensitivity-value').textContent = `${event.target.value}%`;
 }
 
-function updateBuffer(event) {
-  state.planning.bufferMeters = Number(event.target.value);
-  $('#buffer-value').textContent = `${state.planning.bufferMeters} m`;
-  renderPlanningArea();
-}
-
 function updateDroneOptions(event) {
   state.planning[event.target.id === 'small-drones' ? 'smallDrones' : 'largeDrones'] = Math.max(0, Math.min(30, Number(event.target.value) || 0));
+}
+
+function updateDroneCount(event) {
+  state.planning.fleet[event.target.dataset.droneId] = Math.max(0, Math.min(30, Number(event.target.value) || 0));
+  persistMissions();
+}
+
+
+function updateDroneModel(event) {
+  const key = event.target.id === 'small-drone-model' ? 'smallDroneModelId' : 'largeDroneModelId';
+  state.planning[key] = event.target.value;
+  persistMissions();
+  render();
 }
 
 function updatePlacementWeight(event) {
@@ -160,7 +293,6 @@ function switchMission(id, render) {
   clearPlacement({ preserveState: true });
   if (!activateMission(id)) return;
   refreshMissionView();
-  state.missionMenuOpen = false;
   render();
 }
 
@@ -170,13 +302,12 @@ function createNewMission(render) {
   clearPlacement({ preserveState: true });
   addMission(name);
   refreshMissionView();
-  state.missionMenuOpen = false;
   render();
 }
 
 function deleteMission(id, render) {
   const mission = state.missions.find((item) => item.id === id);
-  if (!mission || !window.confirm(`Supprimer la mission « ${mission.name} » ?`)) return;
+  if (!mission) return;
   if (id === state.activeMissionId) {
     clearPlacement({ preserveState: true });
     if (!removeActiveMission()) return;
@@ -185,7 +316,6 @@ function deleteMission(id, render) {
     state.missions.splice(state.missions.indexOf(mission), 1);
     persistMissions();
   }
-  state.missionMenuOpen = false;
   render();
 }
 

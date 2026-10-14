@@ -1,4 +1,4 @@
-import { state } from '../state.js';
+import { droneModels, state } from '../state.js';
 import { getLeafletMap } from '../map.js';
 import { getProtectedArea } from './area.js';
 
@@ -16,6 +16,12 @@ export function clearPlacement({ preserveState = false } = {}) {
 
 export function calculatePlacement() {
   const optimizer = getOptimizer();
+  const collisionInput = document.getElementById('max-collision-input');
+  const maxAllowed = collisionInput ? Number(collisionInput.value) : 50;
+  if (!Number.isFinite(maxAllowed) || maxAllowed < 0 || maxAllowed > 100 || (collisionInput && !collisionInput.value.trim())) {
+    throw new Error('Indiquez un seuil de collision compris entre 0 et 100%.');
+  }
+
   clearPlacement();
   const gpx = state.planning.gpxGeoJson;
   const area = getProtectedArea();
@@ -23,23 +29,17 @@ export function calculatePlacement() {
 
   const lines = gpx ? optimizer.extractLines(gpx) : [];
   const rings = area ? optimizer.extractRings([area]) : [];
-  const counts = {
-    small: Number(state.planning.smallDrones),
-    large: Number(state.planning.largeDrones)
-  };
-  if (counts.small + counts.large === 0) throw new Error('Indiquez au moins un drone de 1 km ou de 2 km.');
+  const counts = Object.fromEntries(droneModels.map((drone) => [drone.id, Number(state.planning.fleet?.[drone.id] || 0)]));
+  const radii = Object.fromEntries(droneModels.map((drone) => [drone.id, drone.maxRange]));
+  if (Object.values(counts).every((count) => count === 0)) throw new Error('Indiquez au moins un drone dans la flotte.');
 
   const demand = optimizer.buildDemand(lines, rings, {
     radius: state.planning.bufferMeters,
     wPath: state.planning.pathWeight,
     wPoly: state.planning.areaWeight
   });
-  const result = optimizer.optimize(demand, counts);
+  const result = optimizer.optimize(demand, counts, radii);
   const collisions = renderPlacement(result.pilots, demand.proj);
-
-  // On récupère directement la valeur du champ HTML (50 par défaut si introuvable)
-  const collisionInput = document.getElementById('max-collision-input');
-  const maxAllowed = collisionInput ? parseInt(collisionInput.value, 10) : 50;
 
   if (collisions.percent > maxAllowed) {
     clearPlacement(); // Efface la carte
@@ -59,13 +59,16 @@ function renderPlacement(pilots, projection) {
     index,
     latLng: projection.toLatLng(pilot.x, pilot.y)
   }));
-  const colors = { small: '#e51e64', large: '#8e24aa' };
+  const palette = ['#e51e64', '#8e24aa', '#034a90', '#15803d', '#b45309', '#7c3aed'];
+  const colors = Object.fromEntries(droneModels.map((drone, index) => [drone.id, palette[index % palette.length]]));
+  const labels = Object.fromEntries(droneModels.map((drone) => [drone.id, drone.model]));
   placed.forEach((pilot) => {
+    const color = colors[pilot.type] || '#034a90';
     L.circle(pilot.latLng, {
       radius: pilot.radius,
-      color: colors[pilot.type],
+      color,
       weight: 2,
-      fillColor: colors[pilot.type],
+      fillColor: color,
       fillOpacity: 0.08,
       interactive: false
     }).addTo(placementLayer);
@@ -86,7 +89,16 @@ function renderPlacement(pilots, projection) {
         placed[first].y - placed[second].y
       );
       if (distance >= placed[first].radius + placed[second].radius) continue;
-      const intersection = turf.intersect(turf.featureCollection([circles[first], circles[second]]));
+      let intersection = null;
+      try {
+        intersection = turf.intersect(turf.featureCollection([circles[first], circles[second]]));
+      } catch {
+        try {
+          intersection = turf.intersect(circles[first], circles[second]);
+        } catch {
+          intersection = null;
+        }
+      }
       if (!intersection) continue;
       pairs += 1;
       const currentCollisionArea = turf.area(intersection);
@@ -109,13 +121,14 @@ function renderPlacement(pilots, projection) {
     }
   }
   placed.forEach((pilot) => {
+    const color = colors[pilot.type] || '#034a90';
     L.circleMarker(pilot.latLng, {
       radius: 7,
       color: '#ffffff',
       weight: 2,
-      fillColor: colors[pilot.type],
+      fillColor: color,
       fillOpacity: 1
-    }).bindTooltip(`Drone ${pilot.index + 1} · ${pilot.radius / 1000} km`).addTo(placementLayer);
+    }).bindTooltip(`Drone ${pilot.index + 1} · ${labels[pilot.type] || 'Modèle'} · ${pilot.radius / 1000} km`).addTo(placementLayer);
   });
   return { pairs, collisionArea, percent: Math.round(maxOverlapPercent) };
 }
