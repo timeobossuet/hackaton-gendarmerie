@@ -15,6 +15,7 @@ export function createMission(name = 'Mission sans nom') {
       gpxGeoJson: null,
       smallDrones: 3,
       largeDrones: 2,
+      authorizedCategories: { ZIT: false, AUTORISATION: false },
       pathWeight: 10,
       areaWeight: 1,
       calculating: false,
@@ -58,7 +59,20 @@ export const state = {
   planning: missions[0].planning,
   zoomSensitivity: MAP_CONFIG.defaultZoomSensitivity,
   zoomSettingsOpen: false,
-  weather: missions[0].weather
+  weather: missions[0].weather,
+  restrictions: {
+    visible: false,
+    scanning: false,
+    query: '',
+    gridSize: 8,
+    radiusKm: 6,
+    location: null,
+    error: null,
+    status: '',
+    counts: { ZIT: 0, AUTORISATION: 0, LAC: 0, FORET: 0, LIBRE: 0 },
+    cells: [],
+    filters: { ZIT: true, AUTORISATION: true, LAC: true, FORET: true, LIBRE: true }
+  }
 };
 
 export function persistMissions() {

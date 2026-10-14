@@ -19,6 +19,12 @@ import { parseGpx } from './planning/gpx.js';
 import { fitMapToGpx, renderPlanningArea } from './planning/area.js';
 import { calculatePlacement, clearPlacement } from './planning/placement.js';
 import { getLeafletMap } from './map.js';
+import {
+  initializeRestrictionsLayer,
+  scanRestrictions,
+  setRestrictionCategoryVisibility,
+  setRestrictionsVisibility
+} from './restrictions/scanner.js';
 
 export function bindEvents({ render }) {
   initializeMap();
@@ -26,7 +32,30 @@ export function bindEvents({ render }) {
   renderPlanningArea();
   initializeWeatherLayer();
   setWeatherVisibility(state.weatherVisible);
+  initializeRestrictionsLayer();
 
+  $('#restrictions-toggle').addEventListener('click', () => {
+    setRestrictionsVisibility(!state.restrictions.visible);
+    render();
+  });
+  $('#restrictions-query').addEventListener('input', (event) => {
+    state.restrictions.query = event.target.value;
+  });
+  $('#restrictions-query').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') scanRestrictionsFromControls(render);
+  });
+  $('#restrictions-radius').addEventListener('input', (event) => {
+    state.restrictions.radiusKm = event.target.value;
+  });
+  $('#restrictions-grid-size').addEventListener('input', (event) => {
+    state.restrictions.gridSize = event.target.value;
+  });
+  $('#restrictions-scan').addEventListener('click', () => scanRestrictionsFromControls(render));
+  document.querySelectorAll('[data-restriction-filter]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      setRestrictionCategoryVisibility(checkbox.dataset.restrictionFilter, checkbox.checked);
+    });
+  });
   $('#toggle-left').addEventListener('click', () => {
     state.leftMenuOpen = !state.leftMenuOpen;
     render();
@@ -85,6 +114,24 @@ export function bindEvents({ render }) {
   $('#path-weight').addEventListener('input', updatePlacementWeight);
   $('#area-weight').addEventListener('input', updatePlacementWeight);
   $('#optimize-placement').addEventListener('click', () => optimizePlacement(render));
+  document.querySelectorAll('[data-placement-authorization]').forEach((checkbox) => {
+    checkbox.addEventListener('change', () => {
+      const category = checkbox.dataset.placementAuthorization;
+      state.planning.authorizedCategories ||= { ZIT: false, AUTORISATION: false };
+      state.planning.authorizedCategories[category] = checkbox.checked;
+      persistMissions();
+      if (state.planning.placement) optimizePlacement(render);
+      else render();
+    });
+  });
+  document.querySelectorAll('[data-pilot-lock]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const pilot = state.planning.placement?.pilots.find(({ id }) => id === button.dataset.pilotLock);
+      if (!pilot) return;
+      pilot.locked = !pilot.locked;
+      optimizePlacement(render);
+    });
+  });
   $('#weather-toggle').addEventListener('click', () => {
     state.weatherVisible = !state.weatherVisible;
     setWeatherVisibility(state.weatherVisible);
@@ -96,6 +143,49 @@ export function bindEvents({ render }) {
   $('#zoom-settings').addEventListener('click', () => toggleZoomSettings(render));
   $('#zoom-sensitivity')?.addEventListener('input', updateZoomSensitivity);
   $('#weather-scan').addEventListener('click', scanFromControls);
+}
+
+async function scanRestrictionsFromControls(render) {
+  const query = $('#restrictions-query').value.trim();
+  const radiusKm = $('#restrictions-radius').value;
+  const gridSize = $('#restrictions-grid-size').value;
+  state.restrictions.query = query;
+  state.restrictions.scanning = true;
+  state.restrictions.error = null;
+  state.restrictions.status = 'Préparation du scan…';
+  setRestrictionsVisibility(true);
+  render();
+
+  try {
+    const hasPlacement = Boolean(state.planning.placement);
+    const result = await scanRestrictions({
+      query,
+      radiusKm,
+      gridSize,
+      onStatus: (message) => {
+        state.restrictions.status = message;
+        const status = $('#restrictions-status');
+        if (status) {
+          status.textContent = message;
+          status.classList.remove('hidden', 'text-red-600');
+        }
+      }
+    });
+    state.restrictions.status = `Scan terminé : ${result.cellCount} secteurs analysés, ${result.constraintCount} éléments OSM détectés.`;
+    if (hasPlacement) {
+      try {
+        state.planning.placementError = null;
+        calculatePlacement();
+      } catch (error) {
+        state.planning.placementError = error instanceof Error ? error.message : 'Le placement ne peut pas être recalculé avec ces restrictions.';
+      }
+    }
+  } catch (error) {
+    state.restrictions.error = error instanceof Error ? error.message : 'Le scan des restrictions a échoué.';
+  } finally {
+    state.restrictions.scanning = false;
+    render();
+  }
 }
 
 function toggleZoomSettings(render) {

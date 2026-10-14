@@ -220,25 +220,40 @@
    * 3. Optimisation : glouton + recherche locale + raffinement
    * ====================================================================== */
 
-  function optimize(demand, counts, radii) {
+  function optimize(demand, counts, radii, existingPilots = [], isPositionAllowed = () => true) {
     const { n, nPath, X, Y, W, CAT, GI, GJ, step } = demand;
     radii = radii || CONFIG.radii;
     const r2 = { small: radii.small * radii.small, large: radii.large * radii.large };
     const mod = (a, k) => ((a % k) + k) % k;
+    const invalidLockedPilot = existingPilots.find(pilot =>
+      pilot.locked &&
+      (pilot.type === "small" || pilot.type === "large") &&
+      Number.isFinite(pilot.x) && Number.isFinite(pilot.y) &&
+      !isPositionAllowed(pilot.x, pilot.y)
+    );
+    if (invalidLockedPilot) {
+      throw new Error("Un TP bloqué se trouve dans un secteur inadapté. Autorisez ce secteur ou autorisez le déplacement du TP avant de recalculer.");
+    }
 
     // --- positions candidates (sous-échantillon des points de demande)
     const nGrid = n - nPath;
     const kGrid = Math.max(1, Math.ceil(Math.sqrt(nGrid / CONFIG.maxGridCandidates)));
     const kPath = Math.max(1, Math.ceil(nPath / CONFIG.maxPathCandidates));
     let cand = [];
+    const eligibleCandidates = [];
     for (let idx = 0; idx < n; idx++) {
+      if (!isPositionAllowed(X[idx], Y[idx])) continue;
+      eligibleCandidates.push(idx);
       if (CAT[idx] === 0) { if (idx % kPath === 0) cand.push(idx); }
       else if (mod(GI[idx], kGrid) === 0 && mod(GJ[idx], kGrid) === 0) cand.push(idx);
     }
     if (cand.length < 5) {
-      const k = Math.max(1, Math.ceil(n / CONFIG.maxGridCandidates));
+      const k = Math.max(1, Math.ceil(eligibleCandidates.length / CONFIG.maxGridCandidates));
       cand = [];
-      for (let idx = 0; idx < n; idx += k) cand.push(idx);
+      for (let i = 0; i < eligibleCandidates.length; i += k) cand.push(eligibleCandidates[i]);
+    }
+    if (cand.length === 0) {
+      throw new Error("Aucun emplacement adapté n’a été trouvé dans les secteurs analysés. Étendez le scan des restrictions ou vérifiez le lieu de mission.");
     }
 
     // --- listes de couverture précalculées
@@ -267,8 +282,43 @@
 
     // --- 1) glouton
     const remaining = { small: counts.small, large: counts.large };
-    const total = counts.small + counts.large;
     const pilots = [];
+    const available = existingPilots.filter(pilot =>
+      (pilot.type === "small" || pilot.type === "large") &&
+      Number.isFinite(pilot.x) && Number.isFinite(pilot.y)
+    );
+    const lockedCounts = {
+      small: available.filter(pilot => pilot.locked && pilot.type === "small").length,
+      large: available.filter(pilot => pilot.locked && pilot.type === "large").length
+    };
+    for (const type of ["small", "large"]) {
+      if (lockedCounts[type] > counts[type]) {
+        throw new Error(`La flotte ne contient pas assez de drones ${type === "small" ? "1 km" : "2 km"} pour conserver tous les drones bloqués.`);
+      }
+    }
+
+    const redeploy = [];
+    available.forEach(pilot => {
+      if (!pilot.locked) return;
+      const list = coverList(pilot.x, pilot.y, r2[pilot.type]);
+      pilots.push({ ...pilot, previousX: pilot.x, previousY: pilot.y, list, fixed: true });
+      apply(list, +1);
+      remaining[pilot.type]--;
+    });
+
+    available.forEach(pilot => {
+      if (pilot.locked || remaining[pilot.type] <= 0) return;
+      if (!isPositionAllowed(pilot.x, pilot.y)) {
+        redeploy.push(pilot);
+        return;
+      }
+      const list = coverList(pilot.x, pilot.y, r2[pilot.type]);
+      pilots.push({ ...pilot, previousX: pilot.x, previousY: pilot.y, list, fixed: false });
+      apply(list, +1);
+      remaining[pilot.type]--;
+    });
+
+    const total = remaining.small + remaining.large;
     for (let p = 0; p < total; p++) {
       let best = { g: -1, t: null, c: -1 };
       for (const t of types) {
@@ -289,6 +339,7 @@
     for (let iter = 0; iter < CONFIG.maxLocalSearchIter; iter++) {
       let improved = false;
       for (const p of pilots) {
+        if (p.fixed) continue;
         apply(p.list, -1);
         let bestG = gainOf(p.list), bestC = -1;
         const L = lists[p.type];
@@ -310,11 +361,13 @@
     for (let pass = 0; pass < CONFIG.maxRefinePass; pass++) {
       let improved = false;
       for (const p of pilots) {
+        if (p.fixed) continue;
         apply(p.list, -1);
         let bestG = gainOf(p.list), best = null;
         for (let i = 0; i < n; i++) {
           const dx = X[i] - p.x, dy = Y[i] - p.y;
           if (dx * dx + dy * dy > refineR2) continue;
+          if (!isPositionAllowed(X[i], Y[i])) continue;
           const l = coverList(X[i], Y[i], r2[p.type]);
           const g = gainOf(l);
           if (g > bestG + 1e-9) { bestG = g; best = { i, l }; }
@@ -325,6 +378,17 @@
       if (!improved) break;
     }
 
+    redeploy.forEach(previous => {
+      const replacement = pilots.find(pilot =>
+        pilot.type === previous.type && !Number.isFinite(pilot.previousX)
+      );
+      if (replacement) {
+        replacement.id = previous.id;
+        replacement.previousX = previous.x;
+        replacement.previousY = previous.y;
+      }
+    });
+
     // --- statistiques
     let wTot = 0, wCov = 0;
     const cnt = [0, 0, 0], cov = [0, 0, 0];
@@ -334,7 +398,22 @@
     }
     const pct = c => (cnt[c] ? cov[c] / cnt[c] : null);
     return {
-      pilots: pilots.map(p => ({ type: p.type, x: p.x, y: p.y, radius: radii[p.type] })),
+      pilots: pilots.map(p => {
+        const wasExisting = Number.isFinite(p.previousX) && Number.isFinite(p.previousY);
+        const moved = wasExisting && (p.x !== p.previousX || p.y !== p.previousY);
+        const status = p.fixed || (wasExisting && !moved)
+          ? "maintained"
+          : wasExisting ? "redeployed" : "new";
+        return {
+          id: p.id,
+          type: p.type,
+          x: p.x,
+          y: p.y,
+          radius: radii[p.type],
+          locked: Boolean(p.fixed),
+          status
+        };
+      }),
       stats: { weighted: wCov / wTot, path: pct(0), buffer: pct(1), poly: pct(2) }
     };
   }

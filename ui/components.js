@@ -155,8 +155,15 @@ function leftPanelComponent() {
           <input id="area-weight" type="range" min="1" max="100" step="1" value="${state.planning.areaWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
         </label>
         <p class="mt-1 text-[10px] leading-4 text-gray-500">Une valeur élevée répartit davantage les drones dans toute la zone.</p>
+        <div class="mt-3 rounded-md border border-notion-200 p-2">
+          <p class="mb-1 text-[10px] font-semibold text-notion-700">Autorisations obtenues</p>
+          ${authorizationOption('ZIT', 'Zone militaire / ZIT')}
+          ${authorizationOption('AUTORISATION', 'Zone jaune / autorisation requise')}
+          <p class="mt-1 text-[9px] leading-4 text-notion-500">Cochez uniquement si l’autorisation officielle a été obtenue. Les zones d’eau et de forêt restent évitées.</p>
+        </div>
+        <p class="mt-2 text-[9px] leading-4 text-amber-700">${state.restrictions.cells.length ? 'Le placement évite les secteurs inadaptés du scan OSM.' : 'Scannez les restrictions avant le placement pour filtrer les secteurs inadaptés.'}</p>
         <div class="mt-3 grid grid-cols-2 gap-2">
-          <button id="optimize-placement" type="button" class="rounded-md bg-gendarmerie-blue px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-gendarmerie-navy disabled:cursor-not-allowed disabled:bg-notion-100 disabled:text-notion-400" ${state.planning.calculating || (!state.planning.gpxGeoJson && !state.polygonAdded) ? 'disabled' : ''}>${state.planning.calculating ? 'Placement en cours…' : 'Calculer le placement'}</button>
+          <button id="optimize-placement" type="button" class="rounded-md bg-gendarmerie-blue px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-gendarmerie-navy disabled:cursor-not-allowed disabled:bg-notion-100 disabled:text-notion-400" ${state.planning.calculating || (!state.planning.gpxGeoJson && !state.polygonAdded) ? 'disabled' : ''}>${state.planning.calculating ? 'Placement en cours…' : state.planning.placement ? 'Replanifier la flotte' : 'Calculer le placement'}</button>
         </div>
         ${placementResultComponent(hasProtectedArea)}
         </section>
@@ -168,14 +175,18 @@ function leftPanelComponent() {
 }
 
 function placementResultComponent(hasProtectedArea) {
-  if (state.planning.placementError) {
+  const result = state.planning.placement;
+  if (state.planning.placementError && !result) {
     return `<div class="mt-3 rounded-md bg-red-50 px-2.5 py-2 text-[10px] leading-4 text-red-600">${state.planning.placementError}</div>`;
   }
-  const result = state.planning.placement;
   if (!result) return `<p class="mt-3 text-[10px] leading-4 text-notion-400">${hasProtectedArea ? 'Réglez la flotte puis calculez le placement pour afficher les zones de couverture.' : 'Ajoutez un chemin GPX ou dessinez une zone protégée pour activer le calcul.'}</p>`;
   const percent = (value) => value == null ? '—' : `${Math.round(value * 100)}%`;
+  const maintained = result.pilots.filter(({ status }) => status === 'maintained').length;
+  const redeployed = result.pilots.filter(({ status }) => status === 'redeployed').length;
+  const newPlacements = result.pilots.filter(({ status }) => status === 'new').length;
   return `
     <div class="mt-3 rounded-md border border-green-200 bg-green-50 p-2.5 text-[10px] leading-4 text-green-800">
+      ${state.planning.placementError ? `<div class="mb-2 rounded-md bg-red-50 px-2 py-1.5 text-red-600">${state.planning.placementError}</div>` : ''}
       <div class="mb-2 font-semibold text-green-900">Placement calculé</div>
       <div class="grid grid-cols-2 gap-1">
         <span>Couverture totale</span><strong class="text-right text-green-900">${percent(result.stats.weighted)}</strong>
@@ -183,7 +194,34 @@ function placementResultComponent(hasProtectedArea) {
         <span>Zone couverte</span><strong class="text-right">${percent(result.stats.buffer ?? result.stats.poly)}</strong>
         <span>Zones de chevauchement</span><strong class="text-right">${result.collisions.pairs}</strong>
       </div>
+      <div class="mt-2 border-t border-green-200 pt-2">
+        <div class="flex justify-between"><span>Positions maintenues</span><strong>${maintained}</strong></div>
+        <div class="flex justify-between"><span>TP redéployés</span><strong>${redeployed}</strong></div>
+        ${newPlacements ? `<div class="flex justify-between"><span>Nouveaux placements</span><strong>${newPlacements}</strong></div>` : ''}
+      </div>
+      <div class="mt-2 border-t border-green-200 pt-2">
+        <p class="mb-1 text-green-900">TP à bloquer</p>
+        ${result.pilots.map((pilot, index) => `
+          <div class="flex items-center justify-between gap-2 py-1">
+            <span>TP ${index + 1} · ${pilot.radius / 1000} km</span>
+            <button type="button" data-pilot-lock="${escapeHtml(pilot.id)}" aria-pressed="${Boolean(pilot.locked)}" class="rounded border border-green-300 px-2 py-0.5 font-medium text-green-900 hover:bg-green-100">
+              ${pilot.locked ? 'Autoriser le déplacement' : 'Bloquer'}
+            </button>
+          </div>
+        `).join('')}
+        <p class="mt-1 text-[9px] text-green-700">Les TP bloqués gardent leur position lors d’une replanification.</p>
+      </div>
     </div>
+  `;
+}
+
+function authorizationOption(category, label) {
+  const authorized = state.planning.authorizedCategories?.[category] === true;
+  return `
+    <label class="mt-1 flex cursor-pointer items-center gap-2 text-[10px] text-notion-700">
+      <input type="checkbox" data-placement-authorization="${category}" ${authorized ? 'checked' : ''} class="accent-gendarmerie-blue" />
+      ${label}
+    </label>
   `;
 }
 
@@ -193,6 +231,11 @@ function rightPanelComponent() {
     <div class="space-y-5">
       <section>
         <h2 class="mb-2 text-xs font-semibold">Couches de la carte</h2>
+        <button id="restrictions-toggle" type="button" aria-pressed="${state.restrictions.visible}" class="mb-2 flex w-full items-center justify-between rounded-md border border-notion-200 px-3 py-2.5 text-left transition hover:bg-notion-100">
+          <span class="flex items-center gap-2 text-xs">${componentIcon('layers', 'h-4 w-4 text-notion-500')} Restrictions & terrain</span>
+          <span class="relative h-4 w-7 rounded-full ${state.restrictions.visible ? 'bg-gendarmerie-blue' : 'bg-notion-200'}"><span class="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${state.restrictions.visible ? 'left-3.5' : 'left-0.5'}"></span></span>
+        </button>
+        <p class="mb-3 text-[10px] leading-4 text-notion-500">Affiche les restrictions potentielles et les éléments de terrain détectés.</p>
         <button id="weather-toggle" type="button" class="flex w-full items-center justify-between rounded-md border border-notion-200 px-3 py-2.5 text-left transition hover:bg-notion-100">
           <span class="flex items-center gap-2 text-xs">${componentIcon('layers', 'h-4 w-4 text-notion-500')} Couche météo</span>
           <span class="relative h-4 w-7 rounded-full ${state.weatherVisible ? 'bg-gendarmerie-blue' : 'bg-notion-200'}"><span class="absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-all ${state.weatherVisible ? 'left-3.5' : 'left-0.5'}"></span></span>
@@ -211,10 +254,44 @@ function rightPanelComponent() {
           ${state.weather.error || (state.weather.scanning ? `Scan météo en cours... ${state.weather.progress}%` : '')}
         </div>
       </section>
+      <section class="border-t border-notion-200 pt-4">
+        <h2 class="mb-2 text-xs font-semibold">Analyser les restrictions</h2>
+        <p class="text-[10px] leading-4 text-notion-500">Recherche les données cartographiques autour d’une ville ou du centre actuel de la carte.</p>
+        <label class="mt-3 block text-[10px] text-gray-500" for="restrictions-query">Ville ou code postal
+          <input id="restrictions-query" type="search" value="${escapeHtml(state.restrictions.query || '')}" placeholder="Ex. 31000, Toulouse" autocomplete="off" class="mt-1 w-full rounded-md border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
+        </label>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <label class="text-[10px] text-gray-500" for="restrictions-radius">Rayon (km)
+            <input id="restrictions-radius" type="number" value="${state.restrictions.radiusKm}" min="2" max="20" step="1" class="mt-1 w-full rounded-md border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
+          </label>
+          <label class="text-[10px] text-gray-500" for="restrictions-grid-size">Grille par côté
+            <input id="restrictions-grid-size" type="number" value="${state.restrictions.gridSize}" min="3" max="20" step="1" class="mt-1 w-full rounded-md border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
+          </label>
+        </div>
+        <button id="restrictions-scan" type="button" class="mt-2 w-full rounded-md bg-gendarmerie-blue px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-gendarmerie-navy disabled:cursor-not-allowed disabled:bg-notion-100 disabled:text-notion-400" ${state.restrictions.scanning ? 'disabled' : ''}>${state.restrictions.scanning ? 'Scan en cours…' : 'Scanner les restrictions'}</button>
+        <div id="restrictions-status" role="status" aria-live="polite" class="mt-2 ${state.restrictions.status || state.restrictions.error ? '' : 'hidden'} rounded-md bg-notion-100 px-2.5 py-2 text-[10px] leading-4 ${state.restrictions.error ? 'text-red-600' : 'text-notion-500'}">${escapeHtml(state.restrictions.error || state.restrictions.status)}</div>
+        <div class="mt-3 space-y-1">
+          ${restrictionFilterComponent('ZIT', 'ZIT / Interdit', '#ef4444')}
+          ${restrictionFilterComponent('AUTORISATION', 'Autorisation', '#f59e0b')}
+          ${restrictionFilterComponent('LAC', 'Lacs & eau', '#3b82f6')}
+          ${restrictionFilterComponent('FORET', 'Forêts', '#059669')}
+          ${restrictionFilterComponent('LIBRE', 'Zone libre', '#22c55e')}
+        </div>
+        <p class="mt-2 text-[9px] leading-4 text-notion-500">Les données OpenStreetMap ne sont pas officielles et ne déterminent pas la légalité d’un vol. Vérifiez Géoportail avant toute mission.</p>
+      </section>
     </div>
   `;
 
   return panelFrame({ side: 'right', eyebrow: 'Affichage', title: 'Options de la carte', content, open: state.rightMenuOpen });
+}
+
+function restrictionFilterComponent(category, label, color) {
+  return `
+    <label class="flex cursor-pointer items-center justify-between rounded-md border border-notion-200 px-2 py-1.5 text-[10px] text-notion-700">
+      <span class="flex items-center gap-2"><input type="checkbox" data-restriction-filter="${category}" ${state.restrictions.filters[category] ? 'checked' : ''} class="accent-gendarmerie-blue" /><span class="h-2.5 w-2.5 rounded-sm" style="background:${color}"></span>${label}</span>
+      <span id="restriction-count-${category}" class="min-w-6 rounded bg-notion-100 px-1.5 py-0.5 text-center text-[9px]">${state.restrictions.counts[category]}</span>
+    </label>
+  `;
 }
 
 function mapComponent() {

@@ -16,7 +16,7 @@ export function clearPlacement({ preserveState = false } = {}) {
 
 export function calculatePlacement() {
   const optimizer = getOptimizer();
-  clearPlacement();
+  const previousPilots = state.planning.placement?.pilots || [];
   const gpx = state.planning.gpxGeoJson;
   const area = getProtectedArea();
   if (!gpx && !area) throw new Error('Ajoutez un chemin GPX ou dessinez une zone protégée avant de calculer le placement.');
@@ -34,10 +34,60 @@ export function calculatePlacement() {
     wPath: state.planning.pathWeight,
     wPoly: state.planning.areaWeight
   });
-  const result = optimizer.optimize(demand, counts);
-  const collisions = renderPlacement(result.pilots, demand.proj);
-  state.planning.placement = { ...result, collisions, computedAt: Date.now() };
+  const existingPilots = previousPilots
+    .filter((pilot) => Array.isArray(pilot.latLng) && pilot.latLng.length === 2)
+    .map((pilot, index) => ({
+      id: pilot.id || `drone-${index + 1}`,
+      order: index,
+      type: pilot.type,
+      locked: pilot.locked === true,
+      x: demand.proj.toXY(pilot.latLng[1], pilot.latLng[0])[0],
+      y: demand.proj.toXY(pilot.latLng[1], pilot.latLng[0])[1]
+    }));
+  const isPositionAllowed = createPositionEligibility(demand.proj);
+  const result = optimizer.optimize(demand, counts, undefined, existingPilots, isPositionAllowed);
+  const previousOrder = new Map(existingPilots.map((pilot) => [pilot.id, pilot.order]));
+  const pilots = result.pilots
+    .map((pilot, index) => ({
+      ...pilot,
+      id: pilot.id || `drone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${index + 1}`,
+      latLng: demand.proj.toLatLng(pilot.x, pilot.y)
+    }))
+    .sort((first, second) =>
+      (previousOrder.get(first.id) ?? Infinity) - (previousOrder.get(second.id) ?? Infinity)
+    );
+  const collisions = renderPlacement(pilots, demand.proj);
+  state.planning.placement = { ...result, pilots, collisions, computedAt: Date.now() };
   return state.planning.placement;
+}
+
+function createPositionEligibility(projection) {
+  const cells = state.restrictions.cells;
+  if (!cells.length) return () => true;
+
+  const firstBounds = cells[0].bounds;
+  const size = Math.round(Math.sqrt(cells.length));
+  const south = firstBounds[0][0];
+  const west = firstBounds[0][1];
+  const latStep = (firstBounds[1][0] - south);
+  const lngStep = (firstBounds[1][1] - west);
+  const authorized = state.planning.authorizedCategories || {};
+
+  return (x, y) => {
+    const [lat, lng] = projection.toLatLng(x, y);
+    const row = Math.floor((lat - south) / latStep);
+    const column = Math.floor((lng - west) / lngStep);
+    if (row < 0 || row >= size || column < 0 || column >= size) return false;
+
+    const cell = cells[row * size + column];
+    if (!cell || lat < cell.bounds[0][0] || lat > cell.bounds[1][0] ||
+      lng < cell.bounds[0][1] || lng > cell.bounds[1][1]) return false;
+
+    if (cell.category === 'ZIT' || cell.category === 'AUTORISATION') {
+      return authorized[cell.category] === true;
+    }
+    return cell.category === 'LIBRE';
+  };
 }
 
 function renderPlacement(pilots, projection) {
@@ -53,9 +103,9 @@ function renderPlacement(pilots, projection) {
   placed.forEach((pilot) => {
     L.circle(pilot.latLng, {
       radius: pilot.radius,
-      color: colors[pilot.type],
+      color: colors.small,
       weight: 2,
-      fillColor: colors[pilot.type],
+      fillColor: colors.small,
       fillOpacity: 0.08,
       interactive: false
     }).addTo(placementLayer);
@@ -86,13 +136,16 @@ function renderPlacement(pilots, projection) {
     }
   }
   placed.forEach((pilot) => {
+    const status = pilot.status === 'maintained'
+      ? 'position maintenue'
+      : pilot.status === 'redeployed' ? 'redéployé' : 'nouveau placement';
     L.circleMarker(pilot.latLng, {
       radius: 7,
       color: '#ffffff',
       weight: 2,
-      fillColor: colors[pilot.type],
+      fillColor: pilot.status === 'maintained' ? '#15803d' : pilot.status === 'redeployed' ? '#d97706' : colors[pilot.type],
       fillOpacity: 1
-    }).bindTooltip(`Drone ${pilot.index + 1} · ${pilot.radius / 1000} km`).addTo(placementLayer);
+    }).bindTooltip(`Drone ${pilot.index + 1} · ${pilot.radius / 1000} km · ${pilot.locked ? 'bloqué' : 'déplaçable'} · ${status}`).addTo(placementLayer);
   });
   return { pairs, collisionArea };
 }
