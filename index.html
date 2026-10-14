@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outil de Cartographie - OpenStreetMap</title>
+
+    <!-- Tailwind CSS pour une interface propre -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    
+    <!-- Leaflet Draw CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+
+    <style>
+        /* Réinitialisation des marges pour un affichage plein écran */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Empêche le défilement */
+        }
+
+        /* La carte prend 100% de l'écran */
+        #map {
+            width: 100vw;
+            height: 100vh;
+            z-index: 1; /* S'assure que la carte est sous les éléments flottants */
+        }
+
+        /* Personnalisation mineure de la barre d'outils Leaflet pour un aspect plus moderne */
+        .leaflet-bar {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            border: none !important;
+            border-radius: 0.5rem !important;
+            overflow: hidden;
+        }
+        .leaflet-bar a {
+            border-bottom: 1px solid #e5e7eb !important;
+        }
+        .leaflet-bar a:last-child {
+            border-bottom: none !important;
+        }
+    </style>
+</head>
+<body class="relative">
+
+    <!-- Panneau d'information flottant (UI) -->
+    <div class="absolute top-4 left-1/2 transform -translate-x-1/2 z-[1000] bg-white/90 backdrop-blur-sm px-6 py-3 rounded-full shadow-lg border border-gray-200 pointer-events-none flex items-center gap-3">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+        </svg>
+        <span class="text-sm font-semibold text-gray-700">Utilisez les outils à gauche pour dessiner sur la carte</span>
+    </div>
+
+    <!-- Conteneur de la carte -->
+    <div id="map"></div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Leaflet Draw JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
+    <script>
+        // 1. Initialisation de la carte
+        // Centrée sur la France par défaut (Latitude, Longitude, Niveau de zoom)
+        const map = L.map('map', {
+            zoomControl: false // On désactive pour le replacer plus bas
+        }).setView([46.603354, 1.888334], 6);
+
+        // Repositionner le contrôle de zoom pour éviter qu'il ne se chevauche avec notre panneau
+        L.control.zoom({ position: 'topleft' }).addTo(map);
+
+        // 2. Ajout du fond de carte OpenStreetMap
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // 3. Initialisation du FeatureGroup pour stocker les éléments dessinés
+        // C'est ce calque (layer) qui contiendra tous vos points, lignes et polygones.
+        const drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        // 4. Configuration de la barre d'outils Leaflet.draw
+        const drawControl = new L.Control.Draw({
+            position: 'topleft', // Position de la barre d'outils
+            edit: {
+                featureGroup: drawnItems, // Permet d'éditer ou supprimer les éléments de ce groupe
+                remove: true // Active le bouton "Supprimer" (l'icône de poubelle)
+            },
+            draw: {
+                polygon: {
+                    allowIntersection: false, // Empêche le polygone de se croiser lui-même
+                    showArea: true, // Affiche la surface calculée pendant le dessin
+                    shapeOptions: {
+                        color: '#3b82f6', // Bleu de Tailwind
+                        weight: 3
+                    }
+                },
+                polyline: {
+                    shapeOptions: {
+                        color: '#ef4444', // Rouge de Tailwind
+                        weight: 4
+                    }
+                },
+                rectangle: {
+                    shapeOptions: {
+                        color: '#10b981', // Vert de Tailwind
+                        weight: 3
+                    }
+                },
+                circle: false, // Désactivé (souvent moins utile que polygon/rectangle pour les zones précises)
+                circlemarker: false, // Désactivé
+                marker: true // Active le placement de points
+            }
+        });
+
+        // Ajout de la barre d'outils à la carte
+        map.addControl(drawControl);
+
+        // 5. Gestionnaire d'événements : Que se passe-t-il quand on termine un dessin ?
+        map.on(L.Draw.Event.CREATED, function (event) {
+            const layer = event.layer;
+            const type = event.layerType;
+
+            // Ajoute l'élément dessiné (layer) au groupe "drawnItems" pour qu'il reste affiché
+            drawnItems.addLayer(layer);
+
+            // (Optionnel) Vous pouvez ajouter ici du code pour récupérer les coordonnées.
+            // Exemple : si c'est un point, récupérer la latitude et longitude
+            /*
+            if (type === 'marker') {
+                console.log("Coordonnées du marqueur :", layer.getLatLng());
+            } else if (type === 'polygon' || type === 'rectangle') {
+                console.log("Coordonnées de la zone :", layer.getLatLngs());
+            }
+            */
+        });
+
+        // Traduction de quelques textes de base de Leaflet Draw en Français (Optionnel mais améliore l'UX)
+        L.drawLocal.draw.toolbar.actions.title = 'Annuler le dessin en cours';
+        L.drawLocal.draw.toolbar.actions.text = 'Annuler';
+        L.drawLocal.draw.toolbar.finish.title = 'Terminer le dessin';
+        L.drawLocal.draw.toolbar.finish.text = 'Terminer';
+        L.drawLocal.draw.toolbar.undo.title = 'Supprimer le dernier point';
+        L.drawLocal.draw.toolbar.undo.text = 'Supprimer dernier point';
+        L.drawLocal.draw.handlers.marker.tooltip.start = 'Cliquez sur la carte pour placer un marqueur.';
+        L.drawLocal.draw.handlers.polygon.tooltip.start = 'Cliquez pour commencer à dessiner une zone.';
+        L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Cliquez pour continuer à dessiner la zone.';
+        L.drawLocal.draw.handlers.polygon.tooltip.end = 'Cliquez sur le premier point pour fermer la zone.';
+        L.drawLocal.draw.handlers.polyline.tooltip.start = 'Cliquez pour commencer à tracer un itinéraire.';
+        L.drawLocal.draw.handlers.polyline.tooltip.cont = 'Cliquez pour continuer l\'itinéraire.';
+        L.drawLocal.draw.handlers.polyline.tooltip.end = 'Cliquez sur le dernier point pour terminer.';
+        L.drawLocal.draw.handlers.rectangle.tooltip.start = 'Cliquez et glissez pour dessiner un rectangle.';
+    </script>
+</body>
+</html>
