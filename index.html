@@ -1,304 +1,45 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Planificateur d'Opération (Sur Image)</title>
-
-    <!-- Tailwind CSS -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f7f5" />
+    <title>AERIS — Carte de mission</title>
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    
-    <!-- Leaflet Draw CSS -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-
-    <style>
-        /* Réinitialisation pour le plein écran */
-        body, html {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            font-family: 'Inter', sans-serif;
-            overflow: hidden;
-            background-color: #1e293b; /* slate-800 - Fond sombre derrière l'image */
-        }
-
-        #map {
-            width: 100vw;
-            height: 100vh;
-            z-index: 1;
-        }
-
-        /* Personnalisation de l'UI Leaflet pour Tailwind */
-        .leaflet-bar {
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
-            border: none !important;
-            border-radius: 0.5rem !important;
-            overflow: hidden;
-        }
-        .leaflet-control-zoom {
-            margin-right: 1rem !important;
-            margin-bottom: 1rem !important;
-        }
-    </style>
-</head>
-<body class="relative">
-
-    <!-- Panneau de contrôle flottant (UI principale) -->
-    <div class="absolute top-6 left-1/2 transform -translate-x-1/2 z-[1000] w-11/12 max-w-md bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-gray-200 overflow-hidden transition-all duration-300">
-        
-        <!-- En-tête -->
-        <div class="bg-blue-600 text-white text-center py-3">
-            <h1 class="text-lg font-bold">Planificateur de Zone</h1>
-        </div>
-
-        <div class="p-5">
-            <!-- ETAPE 0 : UPLOAD -->
-            <div id="step-0" class="flex flex-col gap-4">
-                <p class="text-sm text-gray-600 text-center">Importez une image (plan, carte exportée) pour commencer à définir votre zone.</p>
-                <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-blue-300 rounded-lg cursor-pointer bg-blue-50 hover:bg-blue-100 transition-colors">
-                    <div class="flex flex-col items-center justify-center pt-5 pb-6">
-                        <svg class="w-8 h-8 mb-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                        <p class="text-sm font-semibold text-blue-600">Choisir une image locale</p>
-                        <p class="text-xs text-gray-500">PNG, JPG</p>
-                    </div>
-                    <input id="image-upload" type="file" class="hidden" accept="image/png, image/jpeg, image/jpg" />
-                </label>
-            </div>
-
-            <!-- ETAPE 1 : DESSIN -->
-            <div id="step-1" class="hidden flex-col gap-4">
-                <div class="flex items-start gap-3 bg-indigo-50 p-3 rounded-lg border border-indigo-100">
-                    <span class="text-indigo-600 mt-0.5">ℹ️</span>
-                    <p class="text-sm text-indigo-900 font-medium">Utilisez les outils apparus à gauche pour dessiner <b>une seule zone</b> (polygone ou rectangle) représentant votre zone d'opération.</p>
-                </div>
-                
-                <button id="btn-validate" disabled class="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-xl shadow transition-colors flex items-center justify-center gap-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                    Valider la zone d'opération
-                </button>
-            </div>
-
-            <!-- ETAPE 2 : VALIDE / FOCUS -->
-            <div id="step-2" class="hidden flex-col gap-4">
-                <div class="bg-green-50 text-green-800 p-3 rounded-lg border border-green-200 text-center">
-                    <p class="font-bold">✅ Zone verrouillée</p>
-                    <p class="text-sm mt-1">Le reste de la carte a été masqué pour concentrer les opérations.</p>
-                </div>
-                
-                <button id="btn-restart" class="w-full bg-white border-2 border-red-500 text-red-600 hover:bg-red-50 font-bold py-2.5 px-4 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    Recommencer
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Conteneur de la carte -->
-    <div id="map"></div>
-
-    <!-- Leaflet JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    
-    <!-- Leaflet Draw JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
-
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // --- VARIABLES D'ÉTAT ---
-            let map;
-            let imageOverlayLayer;
-            let imageBounds;
-            let drawnItems;
-            let drawControl;
-            let maskLayer;
-
-            // --- ÉLÉMENTS UI ---
-            const step0 = document.getElementById('step-0');
-            const step1 = document.getElementById('step-1');
-            const step2 = document.getElementById('step-2');
-            const uploadInput = document.getElementById('image-upload');
-            const btnValidate = document.getElementById('btn-validate');
-            const btnRestart = document.getElementById('btn-restart');
-
-            // --- INITIALISATION CARTE ---
-            // L.CRS.Simple est utilisé pour afficher une image plate avec des coordonnées (y, x) basées sur les pixels
-            map = L.map('map', {
-                crs: L.CRS.Simple,
-                minZoom: -4, // Permet de dézoomer pour voir de grandes images
-                maxZoom: 3,
-                zoomControl: false // Déplacé en bas à droite
-            });
-
-            L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-            // Groupe pour stocker les dessins
-            drawnItems = new L.FeatureGroup();
-            map.addLayer(drawnItems);
-
-            // --- TRADUCTION LEAFLET DRAW (Optionnel) ---
-            L.drawLocal.draw.toolbar.actions.title = 'Annuler le dessin';
-            L.drawLocal.draw.toolbar.actions.text = 'Annuler';
-            L.drawLocal.draw.toolbar.finish.title = 'Terminer';
-            L.drawLocal.draw.toolbar.finish.text = 'Terminer';
-            L.drawLocal.draw.toolbar.undo.title = 'Supprimer le dernier point';
-            L.drawLocal.draw.toolbar.undo.text = 'Retour';
-            L.drawLocal.draw.handlers.polygon.tooltip.start = 'Cliquez pour commencer la zone.';
-            L.drawLocal.draw.handlers.polygon.tooltip.cont = 'Cliquez pour continuer la zone.';
-            L.drawLocal.draw.handlers.polygon.tooltip.end = 'Cliquez sur le 1er point pour fermer.';
-            L.drawLocal.draw.handlers.rectangle.tooltip.start = 'Cliquez et glissez pour dessiner un rectangle.';
-
-            // --- ETAPE 0 : CHARGEMENT DE L'IMAGE ---
-            uploadInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const reader = new FileReader();
-                reader.onload = function(event) {
-                    const img = new Image();
-                    img.onload = function() {
-                        // 1. Définir les dimensions de l'image comme limites de la carte
-                        const h = img.naturalHeight;
-                        const w = img.naturalWidth;
-                        
-                        // Coordonnées : [bottomLeft, topRight] => [y, x]
-                        imageBounds = [[0, 0], [h, w]];
-
-                        // 2. Ajouter l'image sur la carte
-                        if (imageOverlayLayer) map.removeLayer(imageOverlayLayer);
-                        imageOverlayLayer = L.imageOverlay(img.src, imageBounds).addTo(map);
-
-                        // 3. Cadrer la caméra sur l'image
-                        map.fitBounds(imageBounds);
-
-                        // 4. Initialiser les outils de dessin
-                        initDrawTools();
-
-                        // 5. Changer l'UI
-                        step0.classList.add('hidden');
-                        step1.classList.remove('hidden');
-                        step1.classList.add('flex');
-                    };
-                    img.src = event.target.result;
-                };
-                reader.readAsDataURL(file);
-            });
-
-            // --- FONCTION : INITIALISER OUTILS DE DESSIN ---
-            function initDrawTools() {
-                if (drawControl) map.removeControl(drawControl);
-
-                drawControl = new L.Control.Draw({
-                    position: 'topleft',
-                    edit: {
-                        featureGroup: drawnItems,
-                        remove: true
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        notion: {
+                            50: '#f2f5f8',
+                            100: '#e1e7f0',
+                            200: '#c6d2e3',
+                            300: '#9fb3cf',
+                            400: '#718eb8',
+                            500: '#4e6fa1',
+                            600: '#3c5684',
+                            700: '#30446b',
+                            800: '#2a3a58',
+                            900: '#101e30',
+                            950: '#0a1320',
+                        },
+                        aeris: '#101e30'
                     },
-                    draw: {
-                        polygon: { shapeOptions: { color: '#3b82f6', weight: 3, fillOpacity: 0.2 } },
-                        rectangle: { shapeOptions: { color: '#3b82f6', weight: 3, fillOpacity: 0.2 } },
-                        polyline: false,
-                        circle: false,
-                        circlemarker: false,
-                        marker: false
+                    boxShadow: {
+                        panel: '0 8px 30px rgba(25, 25, 24, 0.08)'
                     }
-                });
-                map.addControl(drawControl);
-            }
-
-            // --- GESTION DU DESSIN ---
-            map.on(L.Draw.Event.CREATED, function (event) {
-                // On s'assure qu'il n'y a qu'UNE seule zone
-                drawnItems.clearLayers();
-                drawnItems.addLayer(event.layer);
-                
-                // Activer le bouton valider
-                btnValidate.disabled = false;
-            });
-
-            map.on(L.Draw.Event.DELETED, function () {
-                // Si l'utilisateur supprime la zone, on désactive la validation
-                if (drawnItems.getLayers().length === 0) {
-                    btnValidate.disabled = true;
                 }
-            });
-
-            // --- ETAPE 2 : VALIDATION ET MASQUAGE ---
-            btnValidate.addEventListener('click', () => {
-                const layers = drawnItems.getLayers();
-                if (layers.length === 0) return;
-
-                const zone = layers[0];
-
-                // 1. Cacher les outils de dessin
-                map.removeControl(drawControl);
-
-                // 2. Créer le masque sombre
-                // L'astuce consiste à faire un "Polygone à trou" (Donut polygon)
-                // L'anneau extérieur (Outer ring) : Les 4 coins de l'image
-                const h = imageBounds[1][0];
-                const w = imageBounds[1][1];
-                const outerRing = [
-                    [0, 0], 
-                    [h, 0], 
-                    [h, w], 
-                    [0, w]
-                ];
-
-                // L'anneau intérieur (Le trou) : Les coordonnées de la zone dessinée
-                // Leaflet retourne les coordonnées sous forme de tableau de tableaux pour les polygones
-                const innerRing = zone.getLatLngs()[0];
-
-                // Création du masque (Le tableau contient l'extérieur, puis le trou)
-                maskLayer = L.polygon([outerRing, innerRing], {
-                    color: 'transparent', // Pas de bordure pour le masque
-                    fillColor: '#000000',
-                    fillOpacity: 0.75,    // Opacité pour bien cacher l'extérieur
-                    interactive: false    // Empêche de cliquer sur le masque
-                }).addTo(map);
-
-                // Mettre en valeur la zone tracée par dessus le masque
-                zone.setStyle({
-                    color: '#10b981', // Vert émeraude
-                    weight: 4,
-                    fillOpacity: 0 // On enlève le remplissage puisqu'il y a le trou du masque
-                });
-
-                // 3. Zoomer sur la zone
-                // Petit délai pour l'animation fluide
-                setTimeout(() => {
-                    map.fitBounds(zone.getBounds(), { padding: [30, 30] });
-                }, 100);
-
-                // 4. Changer l'UI
-                step1.classList.remove('flex');
-                step1.classList.add('hidden');
-                step2.classList.remove('hidden');
-                step2.classList.add('flex');
-            });
-
-            // --- RECOMMENCER ---
-            btnRestart.addEventListener('click', () => {
-                // Nettoyer la carte
-                drawnItems.clearLayers();
-                if (maskLayer) map.removeLayer(maskLayer);
-                if (imageOverlayLayer) map.removeLayer(imageOverlayLayer);
-                if (drawControl) map.removeControl(drawControl);
-                
-                // Réinitialiser la vue et le bouton
-                map.setView([0, 0], 0);
-                uploadInput.value = ''; // Reset l'input file
-                btnValidate.disabled = true;
-
-                // UI Retour à l'étape 0
-                step2.classList.remove('flex');
-                step2.classList.add('hidden');
-                step0.classList.remove('hidden');
-            });
-        });
+            }
+        };
     </script>
+</head>
+
+<body class="overflow-hidden bg-notion-50 font-sans text-notion-900 antialiased">
+    <div id="app" class="relative h-screen w-screen overflow-hidden"></div>
+    <!-- Point d'entrée de l'interface graphique AERIS. -->
+    <script type="module" src="ui/app.js"></script>
 </body>
+
 </html>
