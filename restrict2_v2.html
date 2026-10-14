@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DJI Flight Control - Scan Rapide & Filtres Fixes</title>
+    
+    <!-- Importation de Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <style>
+        /* =========================================================
+           1. CONFIGURATION GLOBALE & CARTE PLEIN ÉCRAN
+           ========================================================= */
+        *, *::before, *::after { box-sizing: border-box; }
+        body, html { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+            background-color: #0f172a; overflow: hidden;
+        }
+        #map { width: 100vw; height: 100vh; z-index: 1; }
+
+        /* Supprime le cadre noir parasite au clic sur un carré */
+        path.leaflet-interactive:focus { outline: none !important; }
+
+        /* =========================================================
+           2. BARRE DE CONTRÔLE SUPÉRIEURE (VERROUILLÉE & FIXE)
+           ========================================================= */
+        #hud-top {
+            position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+            z-index: 9999; width: 95%; max-width: 800px;
+            display: flex; flex-direction: column; gap: 8px;
+            pointer-events: auto;
+        }
+
+        /* Ligne 1 : Recherche + Rayon + Grille + Bouton Scan */
+        .control-bar {
+            display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+            background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            border-radius: 12px; padding: 8px 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+
+        .search-group {
+            display: flex; flex: 1; min-width: 180px;
+            background: #1e293b; border-radius: 8px; border: 1px solid #334155;
+            overflow: hidden;
+        }
+        .search-group input {
+            flex: 1; background: transparent; border: none; padding: 9px 14px;
+            color: #f8fafc; font-size: 13px; outline: none;
+        }
+        .search-group input::placeholder { color: #64748b; }
+
+        .settings-group {
+            display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+            color: #cbd5e1; font-size: 12px; font-weight: 600;
+            background: #1e293b; padding: 6px 10px; border-radius: 8px; border: 1px solid #334155;
+        }
+        .settings-group input[type="number"] {
+            background: #0f172a; color: #38bdf8; border: 1px solid #475569;
+            padding: 4px; border-radius: 4px; outline: none; width: 52px; 
+            text-align: center; font-weight: bold; font-size: 12px;
+        }
+
+        /* Bouton principal Scanner (Sans mouvement vertical au survol) */
+        .btn-scan {
+            background: linear-gradient(135deg, #38bdf8, #0284c7);
+            color: white; border: none; padding: 10px 20px; border-radius: 8px;
+            font-weight: 700; font-size: 13px; letter-spacing: 0.5px;
+            cursor: pointer; transition: filter 0.2s; white-space: nowrap; flex-shrink: 0;
+        }
+        .btn-scan:hover { filter: brightness(1.15); }
+
+        /* =========================================================
+           3. BARRE DE CASES À COCHER (DIMENSIONS FIXES ANTI-DÉCALAGE)
+           ========================================================= */
+        .filter-bar {
+            display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px;
+            background: rgba(15, 23, 42, 0.94); backdrop-filter: blur(12px);
+            border: 1px solid #334155; border-radius: 10px; padding: 8px 12px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+        }
+
+        .filter-chip {
+            display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+            background: #1e293b; padding: 6px 10px; border-radius: 6px;
+            border: 1px solid #334155; color: #e2e8f0; font-size: 12px; font-weight: 600;
+            cursor: pointer; user-select: none;
+        }
+        .filter-chip:hover { border-color: #64748b; }
+        .filter-chip input[type="checkbox"] {
+            accent-color: #38bdf8; width: 14px; height: 14px; margin: 0; cursor: pointer; flex-shrink: 0;
+        }
+        .dot-color { 
+            width: 11px; height: 11px; border-radius: 3px; 
+            border: 1px solid rgba(255,255,255,0.6); flex-shrink: 0; 
+        }
+        /* Largeur minimale fixe pour empêcher la case de bouger quand le chiffre change */
+        .chip-count {
+            background: #0f172a; color: #94a3b8; font-size: 10px; font-weight: 700;
+            padding: 2px 6px; border-radius: 8px; border: 1px solid #334155;
+            min-width: 28px; text-align: center; display: inline-block;
+        }
+
+        /* Bandeau d'état du scan */
+        #chargement {
+            display: none; background: rgba(15, 23, 42, 0.95); color: #38bdf8; 
+            padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600;
+            border: 1px solid #38bdf8; text-align: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        .loading-track {
+            height: 5px; margin-top: 8px; background: #1e293b;
+            border-radius: 5px; overflow: hidden;
+        }
+        .loading-progress {
+            width: 38%; height: 100%; border-radius: inherit;
+            background: linear-gradient(90deg, #0284c7, #38bdf8, #7dd3fc);
+            animation: loading-slide 1.2s ease-in-out infinite;
+        }
+        #chargement.is-error { color: #f87171; border-color: #ef4444; }
+        #chargement.is-error .loading-progress {
+            background: linear-gradient(90deg, #dc2626, #f87171);
+        }
+        @keyframes loading-slide {
+            from { transform: translateX(0); }
+            to { transform: translateX(165%); }
+        }
+
+        /* =========================================================
+           4. FENÊTRE DE DÉTAILS AU CLIC SUR UN CARRÉ (POPUP SOMBRE)
+           ========================================================= */
+        .leaflet-popup-content-wrapper {
+            background: #0f172a !important; color: #f8fafc !important;
+            border-radius: 12px !important; border: 1px solid #334155 !important;
+            padding: 0 !important; box-shadow: 0 15px 35px rgba(0,0,0,0.7) !important; overflow: hidden;
+        }
+        .leaflet-popup-tip { background: #0f172a !important; border: 1px solid #334155; }
+        .leaflet-popup-content {
+            margin: 0 !important; width: 315px !important;
+            max-height: 70vh; overflow-y: auto;
+        }
+        .leaflet-popup-close-button { color: #94a3b8 !important; top: 10px !important; right: 10px !important; }
+
+        .popup-header {
+            background: #1e293b; padding: 12px 15px; border-bottom: 1px solid #334155;
+            font-size: 13px; font-weight: 700; color: #38bdf8; text-transform: uppercase;
+        }
+        .popup-coords { font-size: 11px; color: #64748b; font-weight: normal; display: block; margin-top: 2px; }
+        .popup-body { padding: 14px; }
+
+        .status-card { padding: 9px 10px; border-radius: 8px; margin-bottom: 8px; border: 1px solid; }
+        .status-title { font-size: 10px; text-transform: uppercase; font-weight: 800; opacity: 0.85; display: block; }
+        .status-main { font-size: 12px; font-weight: 700; margin-top: 2px; display: block; }
+        .status-sub { font-size: 11px; margin-top: 3px; opacity: 0.9; display: block; }
+
+        .card-rouge { background: rgba(239, 68, 68, 0.15); border-color: #ef4444; color: #fca5a5; }
+        .card-orange { background: rgba(245, 158, 11, 0.15); border-color: #f59e0b; color: #fde68a; }
+        .card-bleu { background: rgba(59, 130, 246, 0.15); border-color: #3b82f6; color: #93c5fd; }
+        .card-foret { background: rgba(16, 185, 129, 0.15); border-color: #059669; color: #6ee7b7; }
+        .card-vert { background: rgba(34, 197, 94, 0.15); border-color: #22c55e; color: #86efac; }
+
+        .obstacle-list {
+            background: #1e293b; padding: 8px 10px; border-radius: 6px; border: 1px solid #334155;
+            font-size: 11px; color: #cbd5e1;
+        }
+        .obstacle-list b { color: #f8fafc; display: block; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; }
+        .tag {
+            display: inline-block; background: #0f172a; padding: 3px 7px; border-radius: 4px;
+            margin: 2px; border: 1px solid #475569; font-size: 11px;
+        }
+        .drone-restrictions {
+            background: #1e293b; padding: 9px 10px; border-radius: 6px;
+            border: 1px solid #334155; margin-bottom: 8px;
+        }
+        .drone-restrictions-title {
+            color: #f8fafc; display: block; margin-bottom: 6px;
+            font-size: 10px; text-transform: uppercase;
+        }
+        .drone-card {
+            padding: 7px; margin-top: 5px; border-radius: 5px;
+            border: 1px solid #334155; font-size: 10px; color: #cbd5e1;
+        }
+        .drone-card strong { display: block; color: #f8fafc; font-size: 11px; margin-bottom: 3px; }
+        .drone-card span { display: block; margin-top: 2px; }
+        .drone-card a { display: inline-block; margin-top: 3px; color: #7dd3fc; }
+        .drone-card.status-forbidden { border-color: #ef4444; }
+        .drone-card.status-permission { border-color: #f59e0b; }
+        .drone-card.status-available { border-color: #22c55e; }
+        .drone-note { color: #94a3b8; font-size: 10px; margin: 7px 0 0; line-height: 1.4; }
+        .drone-note a { color: #7dd3fc; }
+    </style>
+</head>
+<body>
+
+    <!-- INTERFACE SUPÉRIEURE FLOTTANTE -->
+    <div id="hud-top">
+        <!-- Ligne 1 : Recherche, Rayon, Grille et Bouton Scan -->
+        <div class="control-bar">
+            <div class="search-group">
+                <input type="text" id="input-ville" placeholder="Ville ou Code Postal (ex: 31000, Toulouse)..." autocomplete="off" />
+            </div>
+            
+            <div class="settings-group" title="Rayon autour de la ville">
+                <label for="rayon-km">Rayon (km)</label>
+                <input type="number" id="rayon-km" value="6" min="2" max="20" step="1">
+            </div>
+
+            <div class="settings-group" title="Découpage de la grille (Recalcul instantané)">
+                <label for="precision-grille">Grille</label>
+                <input type="number" id="precision-grille" value="8" min="3" max="20" step="1" onchange="redessinerDepuisCache()">
+            </div>
+
+            <button class="btn-scan" id="btn-chercher" onclick="lancerRechercheOuScan()">
+                SCANNER
+            </button>
+        </div>
+
+        <!-- Ligne 2 : Cases à cocher fixes pour filtrer l'affichage en temps réel -->
+        <div class="filter-bar">
+            <label class="filter-chip">
+                <input type="checkbox" id="chk-ZIT" checked onchange="actualiserVisibiliteCouches()">
+                <span class="dot-color" style="background:#ef4444;"></span>
+                <span>ZIT / Interdit</span>
+                <span class="chip-count" id="cnt-ZIT">0</span>
+            </label>
+
+            <label class="filter-chip">
+                <input type="checkbox" id="chk-AUTORISATION" checked onchange="actualiserVisibiliteCouches()">
+                <span class="dot-color" style="background:#f59e0b;"></span>
+                <span>Autorisation</span>
+                <span class="chip-count" id="cnt-AUTORISATION">0</span>
+            </label>
+
+            <label class="filter-chip">
+                <input type="checkbox" id="chk-LAC" checked onchange="actualiserVisibiliteCouches()">
+                <span class="dot-color" style="background:#3b82f6;"></span>
+                <span>Lacs & Eau</span>
+                <span class="chip-count" id="cnt-LAC">0</span>
+            </label>
+
+            <label class="filter-chip">
+                <input type="checkbox" id="chk-FORET" checked onchange="actualiserVisibiliteCouches()">
+                <span class="dot-color" style="background:#059669;"></span>
+                <span>Forêts</span>
+                <span class="chip-count" id="cnt-FORET">0</span>
+            </label>
+
+            <label class="filter-chip">
+                <input type="checkbox" id="chk-LIBRE" checked onchange="actualiserVisibiliteCouches()">
+                <span class="dot-color" style="background:#22c55e;"></span>
+                <span>Zone Libre</span>
+                <span class="chip-count" id="cnt-LIBRE">0</span>
+            </label>
+        </div>
+
+        <div id="chargement" role="status" aria-live="polite">
+            <span id="message-chargement">⚡ Initialisation...</span>
+            <div class="loading-track" aria-hidden="true"><div class="loading-progress"></div></div>
+        </div>
+    </div>
+
+    <!-- CARTE PLEIN ÉCRAN -->
+    <div id="map"></div>
+
+    <script>
+        // =========================================================================
+        // 1. INITIALISATION DE LA CARTE & BLOCAGE DES MOUVEMENTS PARASITES
+        // =========================================================================
+        const map = L.map('map', { zoomControl: false }).setView([43.6047, 1.4442], 12); 
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+        
+        // Empêche tout clic ou double-clic dans la barre du haut de faire bouger la carte en dessous
+        const hudTop = document.getElementById('hud-top');
+        L.DomEvent.disableClickPropagation(hudTop);
+        L.DomEvent.disableScrollPropagation(hudTop);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { 
+            maxZoom: 19, attribution: '© OpenStreetMap' 
+        }).addTo(map);
+
+        // Chaque catégorie possède son propre calque indépendant
+        const calquesCategories = {
+            ZIT: L.layerGroup().addTo(map),
+            AUTORISATION: L.layerGroup().addTo(map),
+            LAC: L.layerGroup().addTo(map),
+            FORET: L.layerGroup().addTo(map),
+            LIBRE: L.layerGroup().addTo(map)
+        };
+
+        let dernierCentre = { lat: 43.6047, lng: 1.4442, nom: "Toulouse (31000)" };
+        let carreSelectionne = null;
+        let minuterieChargement = null;
+
+        // Mémoire cache locale
+        let cacheZone = { cle: "", contraintes: [], bounds: null, nomZone: "" };
+
+        const PROFILS_DRONES = [
+            {
+                nom: "DJI Mini 5 Pro",
+                vitesseMax: "18 m/s (65 km/h)",
+                fiche: "https://www.dji.com/mini-5-pro/specs"
+            },
+            {
+                nom: "DJI Mavic 3 Enterprise",
+                vitesseMax: "19 m/s (68 km/h, version UE C1)",
+                fiche: "https://enterprise.dji.com/mavic-3-enterprise/specs"
+            },
+            {
+                nom: "DJI Matrice 4T",
+                vitesseMax: "21 m/s (76 km/h)",
+                fiche: "https://enterprise.dji.com/matrice-4-series/specs"
+            }
+        ];
+
+        function afficherChargement(message, estErreur = false) {
+            if (minuterieChargement) clearTimeout(minuterieChargement);
+            const indicateur = document.getElementById('chargement');
+            indicateur.style.display = 'block';
+            indicateur.classList.toggle('is-error', estErreur);
+            document.getElementById('message-chargement').textContent = message;
+        }
+
+        function terminerChargement(message, estErreur = false, delai = 3000) {
+            afficherChargement(message, estErreur);
+            minuterieChargement = setTimeout(() => {
+                document.getElementById('chargement').style.display = 'none';
+                minuterieChargement = null;
+            }, delai);
+        }
+
+        function echapperHTML(valeur) {
+            const entitesHTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+            return String(valeur).replace(/[&<>"']/g, caractere => entitesHTML[caractere]);
+        }
+
+        function genererRestrictionsDrones(categorie, autorites) {
+            let statutVol;
+            let classeStatut;
+            let plafond;
+
+            if (categorie === 'ZIT') {
+                statutVol = 'Vol interdit selon les données détectées';
+                classeStatut = 'status-forbidden';
+                plafond = 'Aucun vol autorisé dans cette zone';
+            } else if (categorie === 'AUTORISATION') {
+                statutVol = 'Autorisation spécifique requise';
+                classeStatut = 'status-permission';
+                plafond = 'Plafond local à vérifier après autorisation';
+            } else {
+                statutVol = 'Aucune restriction aérienne détectée dans les données consultées';
+                classeStatut = 'status-available';
+                plafond = '120 m au-dessus du sol maximum en catégorie Ouverte*';
+            }
+
+            const autoritesHTML = autorites.length
+                ? `<span>Autorité / démarche : ${autorites.map(echapperHTML).join(' | ')}</span>`
+                : '';
+            const dronesHTML = PROFILS_DRONES.map(drone => `
+                <div class="drone-card ${classeStatut}">
+                    <strong>${drone.nom}</strong>
+                    <span>${statutVol}</span>
+                    <span>Altitude : ${plafond}</span>
+                    <span>Vitesse max. constructeur : ${drone.vitesseMax}</span>
+                    <a href="${drone.fiche}" target="_blank" rel="noopener noreferrer">Fiche constructeur</a>
+                </div>
+            `).join('');
+
+            return `
+                <div class="drone-restrictions">
+                    <b class="drone-restrictions-title">Restrictions par drone</b>
+                    ${autoritesHTML}
+                    ${dronesHTML}
+                    <p class="drone-note">
+                        La vitesse indiquée est la capacité maximale constructeur, pas une limite réglementaire à viser.
+                        * Le plafond local peut être inférieur ou le vol interdit. Les données OSM de cette carte ne donnent
+                        pas les plafonds officiels par zone : vérifiez la
+                        <a href="https://www.geoportail.gouv.fr/donnees/restrictions-uas-categorie-ouverte-et-aeromodelisme" target="_blank" rel="noopener noreferrer">carte officielle des restrictions UAS</a>
+                        avant chaque vol.
+                    </p>
+                </div>
+            `;
+        }
+
+        const SERVEURS_OVERPASS_RAPIDES = [
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass.private.coffee/api/interpreter"
+        ];
+
+
+        // =========================================================================
+        // 2. GESTION DES CASES À COCHER (FILTRAGE INSTANTANÉ)
+        // =========================================================================
+        function actualiserVisibiliteCouches() {
+            Object.keys(calquesCategories).forEach(categorie => {
+                const estCoche = document.getElementById(`chk-${categorie}`).checked;
+                const calque = calquesCategories[categorie];
+                if (estCoche) {
+                    if (!map.hasLayer(calque)) map.addLayer(calque);
+                } else {
+                    if (map.hasLayer(calque)) map.removeLayer(calque);
+                }
+            });
+        }
+
+        function viderToutesLesCouches() {
+            Object.keys(calquesCategories).forEach(cat => {
+                calquesCategories[cat].clearLayers();
+                document.getElementById(`cnt-${cat}`).innerText = "0";
+            });
+        }
+
+
+        // =========================================================================
+        // 3. REQUÊTE OVERPASS ULTRA-RAPIDE
+        // =========================================================================
+        function classifierElementOSM(tags) {
+            if (!tags) return null;
+            const nom = tags.name ? `(${tags.name})` : "";
+
+            if (tags.military || tags.landuse === 'military') {
+                return { categorie: 'ZIT', label: `🏕️ Zone Militaire ${nom}`, autorite: 'Ministère des Armées (ZIT - Vol Interdit)' };
+            }
+            if (tags.amenity === 'prison') {
+                return { categorie: 'ZIT', label: `🚨 Prison ${nom}`, autorite: 'Survol strictement interdit (ZIT)' };
+            }
+            if (tags.power === 'plant' || tags.power === 'nuclear') {
+                return { categorie: 'ZIT', label: `⚡ Centrale Énergétique ${nom}`, autorite: 'ZIT Sécurité Nationale' };
+            }
+            if (tags.aeroway === 'runway') {
+                return { categorie: 'ZIT', label: `✈️ Piste d'Aéroport`, autorite: 'DGAC / Tour de contrôle (Exclusion absolue)' };
+            }
+
+            if (tags.aeroway === 'aerodrome') {
+                return { categorie: 'AUTORISATION', label: `🛫 Aérodrome / CTR ${nom}`, autorite: 'Protocole DGAC / AlphaTango requis' };
+            }
+            if (tags.aeroway === 'heliport' || tags.amenity === 'hospital') {
+                return { categorie: 'AUTORISATION', label: `🚁 Héliport / Hôpital ${nom}`, autorite: 'Autorisation Préfectorale / Hélistation' };
+            }
+            if (tags.leisure === 'nature_reserve') {
+                return { categorie: 'AUTORISATION', label: `🦅 Réserve Naturelle ${nom}`, autorite: 'Autorisation spéciale OFB / DREAL' };
+            }
+
+            if (tags.natural === 'water' || tags.waterway === 'riverbank' || tags.landuse === 'reservoir') {
+                return { categorie: 'LAC', label: `🌊 Plan d'eau / Lac ${nom}` };
+            }
+
+            if (tags.landuse === 'forest' || tags.natural === 'wood') {
+                return { categorie: 'FORET', label: `🌲 Forêt / Bois ${nom}` };
+            }
+
+            return null;
+        }
+
+        async function recupererContraintesUltraRapide(latMin, lngMin, latMax, lngMax) {
+            const cleCache = `${latMin.toFixed(3)}_${lngMin.toFixed(3)}_${latMax.toFixed(3)}_${lngMax.toFixed(3)}`;
+            if (cacheZone.cle === cleCache && cacheZone.contraintes.length > 0) {
+                return cacheZone.contraintes;
+            }
+
+            const bbox = `${(latMin - 0.012).toFixed(4)},${(lngMin - 0.012).toFixed(4)},${(latMax + 0.012).toFixed(4)},${(lngMax + 0.012).toFixed(4)}`;
+            
+            const requeteRapide = `[out:json][timeout:10][bbox:${bbox}];(way["military"];way["landuse"="military"];way["amenity"="prison"];way["power"="plant"];way["aeroway"="runway"];node["aeroway"="aerodrome"];way["aeroway"="aerodrome"];node["aeroway"="heliport"];way["aeroway"="heliport"];way["amenity"="hospital"];way["leisure"="nature_reserve"];way["natural"="water"];way["waterway"="riverbank"];way["landuse"="reservoir"];way["landuse"="forest"];way["natural"="wood"];);out bb tags qt;`;
+
+            const controleurs = SERVEURS_OVERPASS_RAPIDES.map(() => new AbortController());
+
+            const promessesServeurs = SERVEURS_OVERPASS_RAPIDES.map(async (urlServeur, index) => {
+                const reponse = await fetch(urlServeur, {
+                    method: 'POST',
+                    body: `data=${encodeURIComponent(requeteRapide)}`,
+                    signal: controleurs[index].signal
+                });
+                if (!reponse.ok) throw new Error("Serveur occupé");
+                const json = await reponse.json();
+                if (!json || !json.elements) throw new Error("Réponse vide");
+                return json;
+            });
+
+            const data = await Promise.any(promessesServeurs);
+            controleurs.forEach(c => c.abort());
+
+            const elements = [];
+            data.elements.forEach(el => {
+                const info = classifierElementOSM(el.tags);
+                if (!info) return;
+
+                let b = null;
+                if (el.bounds) {
+                    b = { sud: el.bounds.minlat, nord: el.bounds.maxlat, ouest: el.bounds.minlon, est: el.bounds.maxlon };
+                } else if (el.lat && el.lon) {
+                    b = { sud: el.lat - 0.002, nord: el.lat + 0.002, ouest: el.lon - 0.002, est: el.lon + 0.002 };
+                }
+
+                if (b && el.tags.aeroway === 'aerodrome') {
+                    b.sud -= 0.015; b.nord += 0.015; b.ouest -= 0.020; b.est += 0.020;
+                } else if (b && (el.tags.aeroway === 'heliport' || el.tags.amenity === 'hospital')) {
+                    b.sud -= 0.005; b.nord += 0.005; b.ouest -= 0.007; b.est += 0.007;
+                }
+
+                if (b) elements.push({ ...info, bounds: b });
+            });
+
+            cacheZone.cle = cleCache;
+            cacheZone.contraintes = elements;
+            return elements;
+        }
+
+        function rectanglesSeChevauchent(r1, r2) {
+            return !(r2.ouest > r1.est || r2.est < r1.ouest || r2.sud > r1.nord || r2.nord < r1.sud);
+        }
+
+
+        // =========================================================================
+        // 4. DESSIN DE LA GRILLE (SANS TREMBLEMENT DE BORDURE AU SURVOL)
+        // =========================================================================
+        function dessinerGrilleDepuisContraintes(contraintes, latMin, lngMin, latMax, lngMax, nomZone) {
+            viderToutesLesCouches();
+            carreSelectionne = null;
+
+            const tailleGrille = parseInt(document.getElementById('precision-grille').value) || 8;
+            const pasLat = (latMax - latMin) / tailleGrille;
+            const pasLng = (lngMax - lngMin) / tailleGrille;
+            const compteurs = { ZIT: 0, AUTORISATION: 0, LAC: 0, FORET: 0, LIBRE: 0 };
+
+            for (let i = 0; i < tailleGrille; i++) {
+                for (let j = 0; j < tailleGrille; j++) {
+                    const sud = latMin + (i * pasLat);
+                    const nord = latMin + ((i + 1) * pasLat);
+                    const ouest = lngMin + (j * pasLng);
+                    const est = lngMin + ((j + 1) * pasLng);
+                    
+                    const tuileLat = (sud + nord) / 2;
+                    const tuileLng = (ouest + est) / 2;
+                    const rectTuile = { sud, nord, ouest, est };
+
+                    const interdictionsAir = new Set();
+                    const autorisationsAir = new Set();
+                    const lacsSol = new Set();
+                    const foretsSol = new Set();
+                    const autorites = new Set();
+
+                    for (let k = 0; k < contraintes.length; k++) {
+                        const c = contraintes[k];
+                        if (rectanglesSeChevauchent(rectTuile, c.bounds)) {
+                            if (c.categorie === 'ZIT') {
+                                interdictionsAir.add(c.label);
+                                if (c.autorite) autorites.add(c.autorite);
+                            } else if (c.categorie === 'AUTORISATION') {
+                                autorisationsAir.add(c.label);
+                                if (c.autorite) autorites.add(c.autorite);
+                            } else if (c.categorie === 'LAC') {
+                                lacsSol.add(c.label);
+                            } else if (c.categorie === 'FORET') {
+                                foretsSol.add(c.label);
+                            }
+                        }
+                    }
+
+                    let categorieReelle = 'LIBRE';
+                    let couleurZone = '#22c55e', opaciteBase = 0.25;
+
+                    if (interdictionsAir.size > 0) {
+                        categorieReelle = 'ZIT';
+                        couleurZone = '#ef4444'; opaciteBase = 0.48;
+                    } else if (autorisationsAir.size > 0) {
+                        categorieReelle = 'AUTORISATION';
+                        couleurZone = '#f59e0b'; opaciteBase = 0.42;
+                    } else if (lacsSol.size > 0) {
+                        categorieReelle = 'LAC';
+                        couleurZone = '#3b82f6'; opaciteBase = 0.45;
+                    } else if (foretsSol.size > 0) {
+                        categorieReelle = 'FORET';
+                        couleurZone = '#059669'; opaciteBase = 0.45;
+                    }
+
+                    compteurs[categorieReelle]++;
+
+                    let htmlStatutAir = "";
+                    if (interdictionsAir.size > 0) {
+                        htmlStatutAir = `
+                            <div class="status-card card-rouge">
+                                <span class="status-title">✈️ Espace Aérien (Vol)</span>
+                                <span class="status-main">🚫 VOL INTERDIT (ZIT / Zone Sensible)</span>
+                                <span class="status-sub">${Array.from(autorites).map(echapperHTML).join(' | ')}</span>
+                            </div>`;
+                    } else if (autorisationsAir.size > 0) {
+                        htmlStatutAir = `
+                            <div class="status-card card-orange">
+                                <span class="status-title">✈️ Espace Aérien (Vol)</span>
+                                <span class="status-main">⚠️ AUTORISATION DE VOL REQUISE</span>
+                                <span class="status-sub">${Array.from(autorites).map(echapperHTML).join(' | ')}</span>
+                            </div>`;
+                    } else {
+                        htmlStatutAir = `
+                            <div class="status-card card-vert">
+                                <span class="status-title">✈️ Espace Aérien (Vol)</span>
+                                <span class="status-main">✅ VOL LIBRE (Aucune restriction aérienne)</span>
+                            </div>`;
+                    }
+
+                    let htmlStatutSol = "";
+                    if (interdictionsAir.size > 0) {
+                        htmlStatutSol = `
+                            <div class="status-card card-rouge">
+                                <span class="status-title">🚛 Positionnement Porteur (Sol)</span>
+                                <span class="status-main">🚫 DÉPLOIEMENT INTERDIT</span>
+                            </div>`;
+                    } else if (lacsSol.size > 0) {
+                        htmlStatutSol = `
+                            <div class="status-card card-bleu">
+                                <span class="status-title">🚛 Positionnement Porteur (Sol)</span>
+                                <span class="status-main">🌊 IMPOSSIBLE (Plan d'eau / Lac)</span>
+                                <span class="status-sub">Survol possible depuis un secteur voisin.</span>
+                            </div>`;
+                    } else if (foretsSol.size > 0) {
+                        htmlStatutSol = `
+                            <div class="status-card card-foret">
+                                <span class="status-title">🚛 Positionnement Porteur (Sol)</span>
+                                <span class="status-main">🌲 IMPOSSIBLE (Zone Boisée / Forêt)</span>
+                                <span class="status-sub">Survol possible mais décollage au sol bloqué.</span>
+                            </div>`;
+                    } else {
+                        htmlStatutSol = `
+                            <div class="status-card card-vert">
+                                <span class="status-title">🚛 Positionnement Porteur (Sol)</span>
+                                <span class="status-main">✅ EMPLACEMENT PORTEUR VALIDE</span>
+                            </div>`;
+                    }
+
+                    // Bordure d'épaisseur fixe (weight: 1.5) pour que le carré ne bouge jamais d'un pixel
+                    const styleParDefaut = {
+                        color: '#ffffff', weight: 1.5, fillColor: couleurZone, fillOpacity: opaciteBase
+                    };
+                    const tuile = L.polygon([[sud, ouest], [nord, ouest], [nord, est], [sud, est]], styleParDefaut)
+                        .addTo(calquesCategories[categorieReelle]);
+
+                    // Au survol, seule l'opacité change (la bordure reste strictement fixe)
+                    tuile.on('mouseover', function() {
+                        if (carreSelectionne !== this) this.setStyle({ fillOpacity: opaciteBase + 0.20 });
+                    });
+                    tuile.on('mouseout', function() {
+                        if (carreSelectionne !== this) this.setStyle(styleParDefaut);
+                    });
+                    tuile.on('popupopen', function() {
+                        if (carreSelectionne && carreSelectionne !== this) {
+                            carreSelectionne.setStyle(carreSelectionne.options.defaultStyle);
+                        }
+                        this.options.defaultStyle = styleParDefaut;
+                        carreSelectionne = this;
+                        this.setStyle({ color: '#38bdf8', weight: 2, fillOpacity: opaciteBase + 0.25 });
+                    });
+                    tuile.on('popupclose', function() {
+                        this.setStyle(styleParDefaut);
+                        if (carreSelectionne === this) carreSelectionne = null;
+                    });
+
+                    const tousElements = [...interdictionsAir, ...autorisationsAir, ...lacsSol, ...foretsSol];
+                    const listeTagsHTML = tousElements.length > 0 
+                        ? tousElements.map(el => `<span class="tag">${echapperHTML(el)}</span>`).join('')
+                        : `<span class="tag">✅ Terrain dégagé & Espace aérien libre</span>`;
+
+                    // autoPanPaddingTopLeft évite que la popup ne pousse la carte sous la barre du haut
+                    tuile.bindPopup(`
+                        <div class="popup-header">
+                            📍 Secteur ${echapperHTML(nomZone)}
+                            <span class="popup-coords">Centre : ${tuileLat.toFixed(4)}, ${tuileLng.toFixed(4)}</span>
+                        </div>
+                        <div class="popup-body">
+                            ${htmlStatutAir}
+                            ${genererRestrictionsDrones(categorieReelle, Array.from(autorites))}
+                            ${htmlStatutSol}
+                            <div class="obstacle-list">
+                                <b>Éléments identifiés dans ce carré :</b>
+                                ${listeTagsHTML}
+                            </div>
+                        </div>
+                    `, { autoPanPaddingTopLeft: [20, 130] });
+                }
+            }
+
+            Object.keys(compteurs).forEach(cat => {
+                document.getElementById(`cnt-${cat}`).innerText = compteurs[cat];
+            });
+
+            actualiserVisibiliteCouches();
+        }
+
+        function redessinerDepuisCache() {
+            if (cacheZone.bounds && cacheZone.contraintes.length > 0) {
+                const b = cacheZone.bounds;
+                dessinerGrilleDepuisContraintes(cacheZone.contraintes, b.latMin, b.lngMin, b.latMax, b.lngMax, cacheZone.nomZone);
+            }
+        }
+
+
+        // =========================================================================
+        // 5. FONCTION DE SCAN PRINCIPALE
+        // =========================================================================
+        async function scannerZone(centreLat, centreLng, nomZone) {
+            const tDebut = performance.now();
+
+            const rayonKm = parseFloat(document.getElementById('rayon-km').value) || 6;
+            const offsetZone = rayonKm / 111;
+            const latMin = centreLat - (offsetZone * 0.7); 
+            const latMax = centreLat + (offsetZone * 0.7);
+            const lngMin = centreLng - offsetZone;
+            const lngMax = centreLng + offsetZone;
+
+            let zoomLevel = rayonKm >= 15 ? 11 : (rayonKm >= 8 ? 12 : 13);
+            map.flyTo([centreLat, centreLng], zoomLevel, { animate: true, duration: 1.0 });
+
+            afficherChargement(`⚡ Récupération des restrictions aériennes et du terrain autour de ${nomZone}...`);
+
+            try {
+                const contraintes = await recupererContraintesUltraRapide(latMin, lngMin, latMax, lngMax);
+                cacheZone.bounds = { latMin, lngMin, latMax, lngMax };
+                cacheZone.nomZone = nomZone;
+
+                dessinerGrilleDepuisContraintes(contraintes, latMin, lngMin, latMax, lngMax, nomZone);
+
+                const dureeSec = ((performance.now() - tDebut) / 1000).toFixed(1);
+                terminerChargement(`✅ Scan terminé en ${dureeSec}s ! (${contraintes.length} zones analysées)`, false, 2800);
+
+            } catch (erreur) {
+                console.error("Erreur Overpass :", erreur);
+                terminerChargement(`⚠️ Serveurs indisponibles. Vérifiez votre connexion et réessayez.`, true, 3500);
+            }
+        }
+
+
+        // =========================================================================
+        // 6. RECHERCHE VILLE / CODE POSTAL (FRANCE)
+        // =========================================================================
+        async function lancerRechercheOuScan() {
+            const input = document.getElementById('input-ville');
+            const recherche = input.value.trim();
+
+            if (!recherche) {
+                scannerZone(dernierCentre.lat, dernierCentre.lng, dernierCentre.nom);
+                return;
+            }
+
+            afficherChargement(`🔍 Localisation de "${recherche}"...`);
+
+            try {
+                const urlGeo = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(recherche)}&limit=1`;
+                const reponse = await fetch(urlGeo);
+                if (!reponse.ok) throw new Error(`Service de géolocalisation indisponible (${reponse.status})`);
+                const donnees = await reponse.json();
+
+                if (donnees.features && donnees.features.length > 0) {
+                    const lieu = donnees.features[0];
+                    const lon = lieu.geometry.coordinates[0];
+                    const lat = lieu.geometry.coordinates[1];
+                    const nomAffiche = `${lieu.properties.city || lieu.properties.name} (${lieu.properties.postcode})`;
+
+                    dernierCentre = { lat, lng: lon, nom: nomAffiche };
+                    input.value = ""; 
+                    scannerZone(lat, lon, nomAffiche);
+                } else {
+                    terminerChargement(`❌ Lieu ou code postal introuvable en France.`, true);
+                }
+            } catch (erreur) {
+                console.error("Erreur recherche :", erreur);
+                terminerChargement(`⚠️ Impossible de localiser le lieu. Vérifiez la connexion et réessayez.`, true);
+            }
+        }
+
+        document.getElementById('input-ville').addEventListener('keypress', e => { 
+            if (e.key === 'Enter') lancerRechercheOuScan(); 
+        });
+
+        // Lancement au démarrage sur Toulouse
+        scannerZone(dernierCentre.lat, dernierCentre.lng, dernierCentre.nom);
+    </script>
+</body>
+</html>
