@@ -1,6 +1,32 @@
 import { MAP_CONFIG } from './config.js';
+import { DEFAULT_DRONE_MODEL_IDS, DRONE_MODELS } from '../data/drones.js';
 
 const STORAGE_KEY = 'aeris-missions';
+const DRONE_STORAGE_KEY = 'aeris-drone-models';
+
+function loadDroneModels() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DRONE_STORAGE_KEY));
+    if (Array.isArray(saved) && saved.length > 0) return saved;
+  } catch {
+    // Ignore corrupted local data and use the bundled catalogue.
+  }
+  return DRONE_MODELS.map((drone) => ({ ...drone }));
+}
+
+export const droneModels = loadDroneModels();
+function hasDroneModel(id) {
+  return droneModels.some((drone) => drone.id === id);
+}
+
+function fallbackDroneModelId(range, preferredId) {
+  if (hasDroneModel(preferredId)) return preferredId;
+  return droneModels.find((drone) => drone.maxRange === range)?.id || droneModels[0]?.id || '';
+}
+
+function defaultFleet() {
+  return Object.fromEntries(droneModels.map((drone) => [drone.id, 0]));
+}
 
 export function createMission(name = 'Mission sans nom') {
   return {
@@ -15,6 +41,13 @@ export function createMission(name = 'Mission sans nom') {
       gpxGeoJson: null,
       smallDrones: 3,
       largeDrones: 2,
+      smallDroneModelId: fallbackDroneModelId(1000, DEFAULT_DRONE_MODEL_IDS.small),
+      largeDroneModelId: fallbackDroneModelId(2000, DEFAULT_DRONE_MODEL_IDS.large),
+      fleet: {
+        ...defaultFleet(),
+        [fallbackDroneModelId(1000, DEFAULT_DRONE_MODEL_IDS.small)]: 3,
+        [fallbackDroneModelId(2000, DEFAULT_DRONE_MODEL_IDS.large)]: 2
+      },
       pathWeight: 10,
       areaWeight: 1,
       calculating: false,
@@ -35,7 +68,27 @@ export function createMission(name = 'Mission sans nom') {
 function loadMissions() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (Array.isArray(saved) && saved.length > 0) return saved;
+    if (Array.isArray(saved) && saved.length > 0) {
+      return saved.map((mission) => ({
+        ...createMission(mission.name || 'Mission sans nom'),
+        ...mission,
+        planning: {
+          ...createMission().planning,
+          ...(mission.planning || {}),
+          smallDroneModelId: fallbackDroneModelId(1000, mission.planning?.smallDroneModelId || DEFAULT_DRONE_MODEL_IDS.small),
+          largeDroneModelId: fallbackDroneModelId(2000, mission.planning?.largeDroneModelId || DEFAULT_DRONE_MODEL_IDS.large)
+          ,
+          fleet: {
+            ...defaultFleet(),
+            ...(mission.planning?.fleet || {}),
+            ...(mission.planning?.fleet ? {} : {
+              [fallbackDroneModelId(1000, mission.planning?.smallDroneModelId || DEFAULT_DRONE_MODEL_IDS.small)]: Number(mission.planning?.smallDrones || 0),
+              [fallbackDroneModelId(2000, mission.planning?.largeDroneModelId || DEFAULT_DRONE_MODEL_IDS.large)]: Number(mission.planning?.largeDrones || 0)
+            })
+          }
+        }
+      }));
+    }
   } catch {
     // Ignore corrupted local data and start with a clean workspace.
   }
@@ -52,13 +105,19 @@ export const state = {
   missionMenuOpen: false,
   activeMissionId: missions[0].id,
   missions,
+  droneModels,
   polygonAdded: missions[0].polygonAdded,
   drawingPolygon: false,
   polygonPoints: missions[0].polygonPoints,
   planning: missions[0].planning,
   zoomSensitivity: MAP_CONFIG.defaultZoomSensitivity,
   zoomSettingsOpen: false,
-  weather: missions[0].weather
+  droneSettingsOpen: false,
+  weather: missions[0].weather,
+  panelPositions: {
+    left: null,
+    right: null
+  }
 };
 
 export function persistMissions() {
@@ -69,6 +128,46 @@ export function persistMissions() {
   }
 }
 
+export function persistDroneModels() {
+    try {
+      localStorage.setItem(DRONE_STORAGE_KEY, JSON.stringify(droneModels));
+    } catch {
+      // The catalogue remains available for the current session.
+    }
+}
+
+export function addDroneModel(model) {
+    droneModels.push(model);
+    state.missions.forEach((mission) => { mission.planning.fleet[model.id] = 0; });
+    persistDroneModels();
+}
+
+export function updateDroneModel(id, changes) {
+    const index = droneModels.findIndex((drone) => drone.id === id);
+    if (index === -1) return false;
+    droneModels[index] = { ...droneModels[index], ...changes };
+    state.missions.forEach((mission) => {
+      if (!(id in mission.planning.fleet)) mission.planning.fleet[id] = 0;
+    });
+    persistDroneModels();
+    return true;
+}
+
+export function removeDroneModel(id) {
+    if (droneModels.length <= 1) return false;
+    const index = droneModels.findIndex((drone) => drone.id === id);
+    if (index === -1) return false;
+    droneModels.splice(index, 1);
+    const replacement = droneModels[0];
+    state.missions.forEach((mission) => {
+      delete mission.planning.fleet[id];
+      if (mission.planning.smallDroneModelId === id) mission.planning.smallDroneModelId = replacement.id;
+      if (mission.planning.largeDroneModelId === id) mission.planning.largeDroneModelId = replacement.id;
+    });
+    persistDroneModels();
+    persistMissions();
+    return true;
+}
 export function saveActiveMission() {
   const mission = state.missions.find(({ id }) => id === state.activeMissionId);
   if (!mission) return;

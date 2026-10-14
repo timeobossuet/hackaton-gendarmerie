@@ -135,6 +135,9 @@
   function buildDemand(lines, rings, opts) {
     const R = opts.radius, wPath = Math.max(1, opts.wPath), wPoly = opts.wPoly;
 
+    if (!lines.length && !rings.length) {
+      throw new Error('Aucune géométrie exploitable (chemin ou zone) trouvée.');
+    }
     const first = lines.length ? lines[0][0] : rings[0][0];
     const proj = makeProjection(first[0], first[1]);
     const pLines = lines.map(l => l.map(c => proj.toXY(c[0], c[1])));
@@ -223,7 +226,7 @@
   function optimize(demand, counts, radii) {
     const { n, nPath, X, Y, W, CAT, GI, GJ, step } = demand;
     radii = radii || CONFIG.radii;
-    const r2 = { small: radii.small * radii.small, large: radii.large * radii.large };
+    const r2 = Object.fromEntries(Object.entries(radii).map(([type, radius]) => [type, radius * radius]));
     const mod = (a, k) => ((a % k) + k) % k;
 
     // --- positions candidates (sous-échantillon des points de demande)
@@ -252,8 +255,9 @@
       return tmp.slice(0, m);
     };
     const types = [];
-    if (counts.small > 0) types.push("small");
-    if (counts.large > 0) types.push("large");
+    Object.keys(counts).forEach((type) => {
+      if (counts[type] > 0 && Number.isFinite(radii[type])) types.push(type);
+    });
     const lists = {};
     types.forEach(t => { lists[t] = cand.map(ci => coverList(X[ci], Y[ci], r2[t])); });
 
@@ -266,11 +270,11 @@
     const apply = (list, d) => { for (let k = 0; k < list.length; k++) covered[list[k]] += d; };
 
     // --- 1) glouton
-    const remaining = { small: counts.small, large: counts.large };
-    const total = counts.small + counts.large;
+    const remaining = { ...counts };
+    const total = Object.values(counts).reduce((sum, v) => sum + (Number(v) || 0), 0);
     const pilots = [];
     for (let p = 0; p < total; p++) {
-      let best = { g: -1, t: null, c: -1 };
+      let best = { g: 0, t: null, c: -1 };
       for (const t of types) {
         if (remaining[t] <= 0) continue;
         const L = lists[t];
@@ -279,6 +283,29 @@
           if (g > best.g) best = { g, t, c };
         }
       }
+
+      if (best.c < 0) {
+        // Gain nul : toute la demande atteignable est déjà couverte.
+        // On répartit les drones restants en maximisant l'éloignement aux pilotes déjà placés.
+        let bestDist = -1;
+        for (const t of types) {
+          if (remaining[t] <= 0) continue;
+          for (let c = 0; c < cand.length; c++) {
+            const cx = X[cand[c]], cy = Y[cand[c]];
+            let minDist = pilots.length ? Infinity : 0;
+            for (const pl of pilots) {
+              const d2 = (pl.x - cx) ** 2 + (pl.y - cy) ** 2;
+              if (d2 < minDist) minDist = d2;
+            }
+            if (minDist > bestDist) {
+              bestDist = minDist;
+              best = { g: 0, t, c };
+            }
+          }
+        }
+      }
+
+      if (!best.t || best.c < 0) break;
       const list = lists[best.t][best.c];
       pilots.push({ type: best.t, x: X[cand[best.c]], y: Y[cand[best.c]], list });
       apply(list, +1);
