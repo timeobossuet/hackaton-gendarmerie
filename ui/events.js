@@ -1,4 +1,4 @@
-import { MAP_CONFIG, SELECTORS } from './config.js';
+import { MAP_CONFIG, SELECTORS, DEFAULT_DEMO_POLYGON } from './config.js';
 import { state } from './state.js';
 import { $ } from './dom.js';
 import {
@@ -19,6 +19,11 @@ import { parseGpx } from './planning/gpx.js';
 import { fitMapToGpx, renderPlanningArea } from './planning/area.js';
 import { calculatePlacement, clearPlacement } from './planning/placement.js';
 import { getLeafletMap } from './map.js';
+import {
+  calculatePolygonAreaKm2,
+  calculateFleetRequirements
+} from './planning/calculator.js';
+import { renderFleetCards } from './components.js';
 
 export function bindEvents({ render }) {
   initializeMap();
@@ -56,7 +61,31 @@ export function bindEvents({ render }) {
     $(SELECTORS.mapHint).classList.remove('hidden');
     bindMapDrawing();
   });
+  $('#default-zone-btn')?.addEventListener('click', () => applyDefaultTestZone(render));
   $(SELECTORS.finishZone)?.addEventListener('click', () => finishPolygon(render));
+  $('#fleet-coverage-slider')?.addEventListener('input', (event) => {
+    state.planning.targetCoverage = Number(event.target.value);
+    const valueSpan = $('#fleet-coverage-value');
+    if (valueSpan) valueSpan.textContent = `${state.planning.targetCoverage}%`;
+
+    const areaKm2 = calculatePolygonAreaKm2(state.polygonPoints);
+    const fleet = calculateFleetRequirements(areaKm2, state.planning.targetCoverage, state.planning.fleetMixRatio || 0.8);
+    const targetAreaSpan = $('#fleet-target-area');
+    if (targetAreaSpan) targetAreaSpan.textContent = `(${fleet.targetAreaKm2.toFixed(2)} km²)`;
+
+    const container = $('#fleet-cards-container');
+    if (container) {
+      container.innerHTML = renderFleetCards(fleet);
+      bindFleetApplyButtons(render);
+    }
+  });
+  document.querySelectorAll('[data-coverage-preset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.planning.targetCoverage = Number(button.dataset.coveragePreset);
+      render();
+    });
+  });
+  bindFleetApplyButtons(render);
   $('#small-drones').addEventListener('input', updateDroneOptions);
   $('#large-drones').addEventListener('input', updateDroneOptions);
   $('#path-weight').addEventListener('input', updatePlacementWeight);
@@ -134,7 +163,9 @@ function restartMission(render) {
     areaWeight: 1,
     calculating: false,
     placement: null,
-    placementError: null
+    placementError: null,
+    targetCoverage: 80,
+    fleetMixRatio: 0.8
   };
   state.weather = {
     gridSize: 5,
@@ -227,3 +258,45 @@ function showMapHint(message) {
   hint.querySelector('div').textContent = message;
   window.setTimeout(() => hint.classList.add('hidden'), 2200);
 }
+
+function bindFleetApplyButtons(render) {
+  document.querySelectorAll('[data-apply-fleet]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const type = button.dataset.applyFleet;
+      const areaKm2 = calculatePolygonAreaKm2(state.polygonPoints);
+      const fleet = calculateFleetRequirements(areaKm2, state.planning.targetCoverage, state.planning.fleetMixRatio || 0.8);
+
+      if (type === 'n1') {
+        state.planning.smallDrones = fleet.n1Only.count;
+        state.planning.largeDrones = 0;
+        showMapHint(`Flotte N1 configurée : ${fleet.n1Only.count} drone(s)`);
+      } else if (type === 'n2') {
+        state.planning.smallDrones = 0;
+        state.planning.largeDrones = fleet.n2Only.count;
+        showMapHint(`Flotte N2 configurée : ${fleet.n2Only.count} drone(s)`);
+      } else if (type === 'mixed') {
+        state.planning.smallDrones = fleet.mixed.n1;
+        state.planning.largeDrones = fleet.mixed.n2;
+        showMapHint(`Flotte mixte configurée : ${fleet.mixed.n1} N1 + ${fleet.mixed.n2} N2`);
+      }
+      render();
+    });
+  });
+}
+
+function applyDefaultTestZone(render) {
+  state.polygonPoints = DEFAULT_DEMO_POLYGON.map((point) => [...point]);
+  state.polygonAdded = true;
+  state.drawingPolygon = false;
+  state.planning.areaMode = 'polygon';
+  state.planning.placement = null;
+  state.planning.placementError = null;
+
+  render();
+  renderPlanningArea();
+  renderMissionPolygon();
+  centerMapOnPolygon();
+  showMapHint('Zone de test par défaut chargée (Mirepoix · 35.7 km²)');
+}
+
+

@@ -16,6 +16,7 @@ Ce dossier contient uniquement le code de l'interface graphique de la dashboard.
 - `weather/popup.js` : contenu des détails météo et compatibilité des drones.
 - `planning/gpx.js` : lecture des fichiers GPX importés par l'utilisateur.
 - `planning/area.js` : tracé GPX, buffer ou polygone de protection et cadrage de la carte.
+- `planning/calculator.js` : calcul de la surface du polygone et dimensionnement de la flotte (N1, N2, mixte).
 - `planning/placement.js` : orchestration du calcul de placement et rendu des couvertures/collisions.
 - `state.js` : état local de l'interface.
 

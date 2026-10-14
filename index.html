@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f7f5" />
-    <title>AERIS — Carte de mission</title>
+    <title>AERIS — Coordination & Placement de Drones</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@7/turf.min.js"></script>
@@ -42,28 +42,1105 @@
         .leaflet-pane { z-index: 1; }
         .leaflet-top, .leaflet-bottom { z-index: 10; }
         .leaflet-control-zoom { display: none; }
-        .weather-popup { min-width: 260px; color: #101e30; }
-        .weather-popup-header { border-bottom: 1px solid #e1e7f0; padding-bottom: 8px; font-size: 12px; font-weight: 700; }
-        .weather-popup-header span { display: block; margin-top: 2px; color: #718eb8; font-size: 10px; font-weight: 400; }
-        .weather-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 10px 0; }
-        .weather-metrics div { border: 1px solid #e1e7f0; border-radius: 6px; padding: 6px; }
-        .weather-metrics small { display: block; color: #718eb8; font-size: 9px; text-transform: uppercase; }
-        .weather-metrics strong { display: block; margin-top: 2px; font-size: 12px; }
-        .weather-stability { border-radius: 6px; padding: 7px; font-size: 10px; font-weight: 600; text-align: center; }
-        .weather-drone-title { margin: 10px 0 5px; color: #718eb8; font-size: 9px; font-weight: 700; text-transform: uppercase; }
-        .weather-drone { display: flex; justify-content: space-between; border-radius: 5px; margin-top: 4px; padding: 6px; font-size: 10px; }
-        .weather-good { color: #15803d; background: #f0fdf4; }
-        .weather-warning { color: #b45309; background: #fffbeb; }
-        .weather-critical { color: #b91c1c; background: #fef2f2; }
+        .custom-tooltip {
+            background: #101e30;
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 3px 7px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .custom-tooltip:before {
+            border-top-color: #101e30;
+        }
     </style>
 </head>
 
 <body class="overflow-hidden bg-notion-50 font-sans text-notion-900 antialiased">
-    <div id="app" class="relative h-screen w-screen overflow-hidden"></div>
+    <div id="app" class="relative h-screen w-screen overflow-hidden">
+        <main class="relative h-full w-full">
+            <!-- Carte Leaflet -->
+            <div id="map" class="relative h-full w-full select-none overflow-hidden bg-[#dfe9d8]">
+                <!-- Hint / Notification toast -->
+                <div id="map-hint" class="pointer-events-none absolute left-1/2 top-6 z-[1500] hidden -translate-x-1/2 rounded-lg border border-aeris/30 bg-white/95 px-4 py-2.5 text-center shadow-panel transition-all">
+                    <div id="map-hint-text" class="text-xs font-semibold text-notion-900">Zone par défaut chargée</div>
+                </div>
+
+                <!-- Contrôles de zoom bas droit -->
+                <div class="pointer-events-auto absolute bottom-5 right-5 z-[1001] flex items-end gap-2">
+                    <div class="flex flex-col overflow-hidden rounded-md border border-notion-200 bg-white/90 shadow-panel backdrop-blur">
+                        <button id="zoom-in" type="button" aria-label="Zoomer" class="grid h-8 w-8 place-items-center border-b border-notion-200 text-lg font-bold text-notion-700 hover:bg-notion-100">+</button>
+                        <button id="zoom-out" type="button" aria-label="Dézoomer" class="grid h-8 w-8 place-items-center text-lg font-bold text-notion-700 hover:bg-notion-100">−</button>
+                    </div>
+                </div>
+
+                <!-- Attribution OSM -->
+                <div class="pointer-events-none absolute bottom-2 left-2 z-[1000] text-[9px] text-notion-500/70">
+                    © OpenStreetMap contributors · Gendarmerie Occitanie
+                </div>
+            </div>
+
+            <!-- Barre de navigation supérieure -->
+            <header class="absolute left-4 right-4 top-4 z-[2000] flex items-center justify-between pointer-events-none">
+                <div class="pointer-events-auto flex items-center gap-2 rounded-lg border border-notion-200 bg-white/95 p-1.5 shadow-panel backdrop-blur">
+                    <button id="toggle-left" title="Ouvrir/fermer le panneau mission" type="button" class="rounded-md p-2 text-notion-500 transition hover:bg-notion-100 hover:text-notion-900">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                    </button>
+                    <div class="flex items-center gap-2 border-l border-notion-200 pl-3 pr-3">
+                        <span class="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md bg-notion-900 text-white font-bold text-xs">
+                            GN
+                        </span>
+                        <div>
+                            <div class="text-sm font-semibold leading-none tracking-tight">AERIS</div>
+                            <div class="mt-1 text-[10px] text-notion-500">Planification & Placement de Drones</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pointer-events-auto flex items-center gap-2">
+                    <button id="recenter-btn" title="Recentrer sur la mission" type="button" class="rounded-lg border border-notion-200 bg-white/95 px-3 py-2 text-xs font-semibold text-notion-700 shadow-panel backdrop-blur transition hover:bg-notion-100">
+                        Recentrer
+                    </button>
+                </div>
+            </header>
+
+            <!-- Panneau Latéral Gauche de Préparation & Placement -->
+            <aside id="left-panel" class="absolute left-4 top-20 z-[2000] w-[calc(100vw-2rem)] max-w-[320px] rounded-lg border border-notion-200 bg-white/95 shadow-panel backdrop-blur transition-all duration-200">
+                <div class="border-b border-notion-200 px-4 py-3">
+                    <div class="text-[10px] font-semibold uppercase tracking-widest text-notion-400">Mission Opérationnelle</div>
+                    <h1 class="mt-1 text-sm font-semibold">Préparer le dispositif</h1>
+                    <p class="mt-1 text-[10px] leading-4 text-notion-500">1. Zone de mission · 2. Dimensionnement · 3. Placement</p>
+                </div>
+
+                <div class="max-h-[calc(100vh-10rem)] overflow-y-auto p-4 space-y-5">
+                    <!-- Étape 1 : Zone d'opération -->
+                    <section>
+                        <div class="mb-2 flex items-center justify-between">
+                            <h2 class="text-xs font-semibold">1. Zone d'opération</h2>
+                            <span id="zone-status-badge" class="rounded bg-notion-100 px-1.5 py-0.5 text-[10px] font-medium text-notion-500">À définir</span>
+                        </div>
+                        <p class="text-xs leading-5 text-notion-500">Définissez la zone à surveiller sur la carte ou utilisez directement la zone de démonstration.</p>
+                        
+                        <div class="mt-3 flex gap-2">
+                            <button id="add-zone-btn" type="button" class="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-notion-400 px-2 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
+                                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                </svg>
+                                <span id="add-zone-text">Dessiner zone</span>
+                            </button>
+                            <button id="default-zone-btn" type="button" class="flex-1 flex items-center justify-center gap-1 rounded-md border border-aeris/30 bg-aeris/5 px-2 py-2 text-xs font-semibold text-aeris transition hover:bg-aeris hover:text-white shadow-sm" title="Charger la zone de démonstration de Mirepoix (35.7 km²)">
+                                ⚡ Zone de test
+                            </button>
+                        </div>
+                        <button id="finish-zone-btn" type="button" class="hidden mt-2 w-full rounded-md bg-aeris px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1b716a] disabled:cursor-not-allowed disabled:opacity-50">
+                            Valider la zone (0 points)
+                        </button>
+                    </section>
+
+                    <!-- Étape 2 : Dimensionnement de la flotte (Calculateur) -->
+                    <section class="border-t border-notion-200 pt-4">
+                        <div class="mb-2 flex items-center justify-between">
+                            <h2 class="text-xs font-semibold">2. Dimensionnement de flotte</h2>
+                            <span id="fleet-area-badge" class="rounded bg-notion-100 px-1.5 py-0.5 text-[10px] font-medium text-notion-500">Zone requise</span>
+                        </div>
+
+                        <div id="fleet-waiting-block" class="rounded-md border border-dashed border-notion-300 bg-notion-50/50 p-3 text-center">
+                            <p class="text-[10px] leading-4 text-notion-500">
+                                Tracez une zone ou cliquez sur <b>⚡ Zone de test</b> ci-dessus pour calculer le nombre de drones nécessaires.
+                            </p>
+                        </div>
+
+                        <div id="fleet-active-block" class="hidden space-y-3">
+                            <!-- Données de départ & surfaces -->
+                            <div class="rounded-md border border-notion-200 bg-notion-50/70 p-2.5 text-[10px] space-y-1 text-notion-600">
+                                <div class="flex justify-between items-center text-notion-900 font-medium">
+                                    <span>Zone d'opération</span>
+                                    <strong id="fleet-area-val" class="text-aeris">0.00 km²</strong>
+                                </div>
+                                <div class="flex justify-between items-center text-[9px] text-notion-500 border-t border-notion-200/60 pt-1">
+                                    <span>N1 (r=1 km) : <b class="text-notion-700">3.14 km²</b></span>
+                                    <span>N2 (r=2 km) : <b class="text-notion-700">12.57 km²</b></span>
+                                </div>
+                            </div>
+
+                            <!-- Réglage pourcentage couverture -->
+                            <div>
+                                <div class="flex items-center justify-between">
+                                    <label for="coverage-slider" class="text-[10px] font-semibold text-notion-700">Couverture souhaitée</label>
+                                    <div class="text-[10px]">
+                                        <span id="coverage-slider-val" class="font-bold text-aeris">80%</span>
+                                        <span id="coverage-target-area" class="text-notion-400 text-[9px]">(0 km²)</span>
+                                    </div>
+                                </div>
+                                <input id="coverage-slider" type="range" min="50" max="100" step="5" value="80" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
+                                <div class="mt-1 flex items-center justify-between gap-1">
+                                    <span class="text-[9px] text-notion-400">Paliers rapides :</span>
+                                    <div class="flex gap-1">
+                                        <button type="button" data-preset="80" class="preset-btn rounded px-1.5 py-0.5 text-[9px] font-medium transition bg-aeris text-white">80%</button>
+                                        <button type="button" data-preset="90" class="preset-btn rounded px-1.5 py-0.5 text-[9px] font-medium transition bg-notion-100 text-notion-600 hover:bg-notion-200">90%</button>
+                                        <button type="button" data-preset="100" class="preset-btn rounded px-1.5 py-0.5 text-[9px] font-medium transition bg-notion-100 text-notion-600 hover:bg-notion-200">100%</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Les 3 cartes de résultats -->
+                            <div id="fleet-cards-list" class="space-y-2">
+                                <!-- Carte 1 : N1 seuls -->
+                                <div class="rounded-md border border-notion-200 bg-white p-2.5 shadow-sm transition hover:border-notion-300">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[10px] font-semibold text-notion-700">1. Drones N1 seuls (Portée 1 km)</span>
+                                        <span class="rounded bg-pink-50 text-[#e51e64] border border-pink-200/60 px-1.5 py-0.5 text-[9px] font-semibold">100% N1</span>
+                                    </div>
+                                    <div class="mt-1.5 flex items-baseline justify-between">
+                                        <div>
+                                            <span id="card-n1-count" class="text-base font-bold text-notion-900">0</span>
+                                            <span class="text-[10px] text-notion-500">drones N1</span>
+                                        </div>
+                                        <span id="card-n1-area" class="text-[9px] text-notion-400">Couvre 0 km²</span>
+                                    </div>
+                                    <button type="button" id="apply-n1-btn" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-notion-200 bg-notion-50 py-1 text-[10px] font-semibold text-notion-700 transition hover:border-aeris hover:bg-aeris hover:text-white">
+                                        Utiliser cette flotte
+                                    </button>
+                                </div>
+
+                                <!-- Carte 2 : N2 seuls -->
+                                <div class="rounded-md border border-notion-200 bg-white p-2.5 shadow-sm transition hover:border-notion-300">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[10px] font-semibold text-notion-700">2. Drones N2 seuls (Portée 2 km)</span>
+                                        <span class="rounded bg-purple-50 text-[#8e24aa] border border-purple-200/60 px-1.5 py-0.5 text-[9px] font-semibold">100% N2</span>
+                                    </div>
+                                    <div class="mt-1.5 flex items-baseline justify-between">
+                                        <div>
+                                            <span id="card-n2-count" class="text-base font-bold text-notion-900">0</span>
+                                            <span class="text-[10px] text-notion-500">drones N2</span>
+                                        </div>
+                                        <span id="card-n2-area" class="text-[9px] text-notion-400">Couvre 0 km²</span>
+                                    </div>
+                                    <button type="button" id="apply-n2-btn" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-notion-200 bg-notion-50 py-1 text-[10px] font-semibold text-notion-700 transition hover:border-aeris hover:bg-aeris hover:text-white">
+                                        Utiliser cette flotte
+                                    </button>
+                                </div>
+
+                                <!-- Carte 3 : Mixte 80/20 -->
+                                <div class="rounded-md border border-aeris/30 bg-[#f7faf9] p-2.5 shadow-sm transition hover:border-aeris">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[10px] font-semibold text-aeris">3. Flotte mixte N1 + N2</span>
+                                        <span id="card-mixed-ratio" class="rounded bg-[#238b82]/10 text-aeris border border-[#238b82]/30 px-1.5 py-0.5 text-[9px] font-semibold">Ratio 80/20</span>
+                                    </div>
+                                    <div class="mt-1.5 flex items-baseline justify-between">
+                                        <div>
+                                            <span id="card-mixed-count" class="text-base font-bold text-aeris">0</span>
+                                            <span class="text-[10px] text-notion-600">drones au total</span>
+                                        </div>
+                                        <span id="card-mixed-area" class="text-[9px] text-notion-400">Couvre 0 km²</span>
+                                    </div>
+                                    <div class="mt-1 flex items-center justify-between rounded bg-white px-2 py-1 text-[9px] font-medium text-notion-700 border border-notion-200/80">
+                                        <span id="card-mixed-n1" class="text-[#e51e64]">0 × N1</span>
+                                        <span class="text-notion-300">·</span>
+                                        <span id="card-mixed-n2" class="text-[#8e24aa]">0 × N2</span>
+                                    </div>
+                                    <button type="button" id="apply-mixed-btn" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded bg-aeris py-1 text-[10px] font-semibold text-white transition hover:bg-[#1b716a] shadow-sm">
+                                        Utiliser cette flotte mixte
+                                    </button>
+                                </div>
+                            </div>
+
+                            <p id="fleet-overlap-note" class="text-[9px] leading-4 text-notion-400"></p>
+                        </div>
+                    </section>
+
+                    <!-- Étape 3 : Placement opérationnel -->
+                    <section class="border-t border-notion-200 pt-4">
+                        <div class="mb-3 flex items-center justify-between">
+                            <h2 class="text-xs font-semibold">3. Placement des drones</h2>
+                            <span id="total-drones-count" class="text-[10px] text-notion-400">5 drones</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 1 km
+                                <input id="small-drones-input" type="number" min="0" max="60" value="3" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
+                            </label>
+                            <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 2 km
+                                <input id="large-drones-input" type="number" min="0" max="60" value="2" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
+                            </label>
+                        </div>
+
+                        <div class="mt-3">
+                            <button id="launch-placement-btn" type="button" class="w-full rounded-md bg-aeris px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-[#1b716a] shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
+                                🚀 Lancer le placement
+                            </button>
+                        </div>
+
+                        <!-- Erreur ou résultat -->
+                        <div id="placement-error" class="hidden mt-3 rounded-md bg-red-50 p-2.5 text-[10px] text-red-600"></div>
+                        <div id="placement-results" class="hidden mt-3 rounded-md border border-green-200 bg-green-50 p-2.5 text-[10px] leading-4 text-green-800">
+                            <div class="mb-2 font-semibold text-green-900">Placement calculé avec succès</div>
+                            <div class="grid grid-cols-2 gap-1">
+                                <span>Couverture souhaitée</span><strong id="res-target-pct" class="text-right">0%</strong>
+                                <span>Couverture atteinte</span><strong id="res-cov-pct" class="text-right text-green-900">0%</strong>
+                                <span>Drones positionnés</span><strong id="res-drones-count" class="text-right">0</strong>
+                                <span>Chevauchements</span><strong id="res-overlap-pairs" class="text-right">0</strong>
+                            </div>
+                            <button id="clear-placement-btn" type="button" class="mt-2 w-full text-center text-[9px] text-green-700 underline hover:text-green-900">
+                                Effacer le placement
+                            </button>
+                        </div>
+                    </section>
+
+                    <!-- Reset mission -->
+                    <button id="reset-btn" type="button" class="w-full rounded-md border border-notion-200 px-3 py-2 text-[10px] font-semibold text-notion-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600">
+                        Réinitialiser la carte
+                    </button>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Scripts Leaflet & Turf -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="src/drones.js"></script>
-    <!-- Point d'entrée de l'interface graphique AERIS. -->
-    <script type="module" src="ui/app.js"></script>
+
+    <!-- Application JavaScript autonome et native -->
+    <script>
+    (function () {
+        "use strict";
+
+        // Coordonnées de test par défaut (Secteur Mirepoix / Grand Hers ~35.7 km²)
+        const DEFAULT_DEMO_POLYGON = [
+            [43.115, 1.845],
+            [43.120, 1.905],
+            [43.085, 1.925],
+            [43.060, 1.880],
+            [43.070, 1.830]
+        ];
+
+        const DRONE_N1 = { name: "Niveau 1", radius: 1000, areaKm2: Math.PI * 1 * 1, color: "#e51e64" };
+        const DRONE_N2 = { name: "Niveau 2", radius: 2000, areaKm2: Math.PI * 2 * 2, color: "#8e24aa" };
+
+        // État de l'application
+        const state = {
+            polygonPoints: [],
+            polygonAdded: false,
+            drawingPolygon: false,
+            targetCoverage: 80,
+            smallDrones: 3,
+            largeDrones: 2,
+            leftMenuOpen: true
+        };
+
+        // Éléments DOM
+        const $ = (id) => document.getElementById(id);
+        const mapHint = $("map-hint");
+        const mapHintText = $("map-hint-text");
+
+        function showHint(text) {
+            if (!mapHint) return;
+            mapHintText.textContent = text;
+            mapHint.classList.remove("hidden");
+            clearTimeout(window._hintTimer);
+            window._hintTimer = setTimeout(() => mapHint.classList.add("hidden"), 3000);
+        }
+
+        // 1. Initialisation Leaflet
+        const map = L.map("map", { zoomControl: false }).setView([43.09, 1.87], 12);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "© OpenStreetMap contributors"
+        }).addTo(map);
+
+        // Couches graphiques Leaflet
+        const missionLayer = L.featureGroup().addTo(map);
+        const draftLayer = L.featureGroup().addTo(map);
+        const placementLayer = L.featureGroup().addTo(map);
+
+        // 2. Fonctions géométriques & calculs autonomes
+        function makeProjection(lat0, lon0) {
+            const kx = 111320 * Math.cos((lat0 * Math.PI) / 180);
+            const ky = 110540;
+            return {
+                toXY: (lat, lon) => [(lon - lon0) * kx, (lat - lat0) * ky],
+                toLatLng: (x, y) => [lat0 + y / ky, lon0 + x / kx]
+            };
+        }
+
+        function pointInPolygon(x, y, ring) {
+            let inside = false;
+            for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+                const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+                if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+
+        function calculatePolygonAreaKm2(points) {
+            if (!points || points.length < 3) return 0;
+            if (typeof turf !== "undefined") {
+                try {
+                    const coords = [...points.map(p => [p[1], p[0]]), [points[0][1], points[0][0]]];
+                    const poly = turf.polygon([coords]);
+                    return turf.area(poly) / 1e6;
+                } catch (e) { }
+            }
+            // Fallback calcul euclidien projeté
+            const lat0 = points[0][0], lon0 = points[0][1];
+            const proj = makeProjection(lat0, lon0);
+            const xy = points.map(p => proj.toXY(p[0], p[1]));
+            let a = 0;
+            for (let i = 0, j = xy.length - 1; i < xy.length; j = i++) {
+                a += xy[j][0] * xy[i][1] - xy[i][0] * xy[j][1];
+            }
+            return Math.abs(a) / 2 / 1e6;
+        }
+
+        // ------------------------------------------------------------------
+        // 3. Moteur de couverture partagé (dimensionnement Étape 2 & placement Étape 3)
+        //    Le dimensionnement et le placement utilisent LA MÊME grille de mesure et
+        //    LE MÊME algorithme glouton : le nombre de drones recommandé est donc
+        //    exactement celui qui atteint la couverture visée une fois positionné.
+        // ------------------------------------------------------------------
+
+        const SIMULATION_MAX_DRONES = 60;
+        const N1_PER_N2 = 4; // flotte mixte : 4 drones N1 pour 1 drone N2
+        const CACHE_LIMIT = 24;
+
+        // Recouvrement géométrique : couvrir une surface avec des cercles sans laisser
+        // de trous impose un surdimensionnement (circle packing) qui croît avec la
+        // couverture visée. Sert de repli quand aucune zone n'est dessinée.
+        const OVERLAP_FACTOR_ANCHORS = [
+            { coverage: 50, factor: 1.25 },
+            { coverage: 80, factor: 1.25 },
+            { coverage: 90, factor: 1.32 },
+            { coverage: 100, factor: 1.40 }
+        ];
+
+        function geometricOverlapFactor(coveragePercent) {
+            const coverage = Math.max(1, Math.min(100, coveragePercent));
+            for (let i = 1; i < OVERLAP_FACTOR_ANCHORS.length; i++) {
+                const prev = OVERLAP_FACTOR_ANCHORS[i - 1];
+                const next = OVERLAP_FACTOR_ANCHORS[i];
+                if (coverage <= next.coverage) {
+                    const t = (coverage - prev.coverage) / (next.coverage - prev.coverage);
+                    return prev.factor + t * (next.factor - prev.factor);
+                }
+            }
+            return OVERLAP_FACTOR_ANCHORS[OVERLAP_FACTOR_ANCHORS.length - 1].factor;
+        }
+
+        function polygonSignature(polygonPts) {
+            return polygonPts.map(p => p[0].toFixed(5) + "," + p[1].toFixed(5)).join(";");
+        }
+
+        // Grille de mesure commune : mêmes pas, mêmes points cibles et mêmes positions
+        // candidates que le placement réel.
+        function buildDemandGrid(polygonPts) {
+            const lat0 = polygonPts[0][0], lon0 = polygonPts[0][1];
+            const proj = makeProjection(lat0, lon0);
+            const ringXY = polygonPts.map(p => proj.toXY(p[0], p[1]));
+
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            ringXY.forEach(([x, y]) => {
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+            });
+
+            const areaEst = (maxX - minX) * (maxY - minY);
+            let step = Math.sqrt(areaEst / 2000);
+            step = Math.min(220, Math.max(40, Math.round(step / 10) * 10));
+
+            const gridPts = [];
+            for (let x = minX; x <= maxX; x += step) {
+                for (let y = minY; y <= maxY; y += step) {
+                    if (pointInPolygon(x, y, ringXY)) gridPts.push([x, y]);
+                }
+            }
+            if (gridPts.length === 0) {
+                let cx = 0, cy = 0;
+                ringXY.forEach(p => { cx += p[0]; cy += p[1]; });
+                gridPts.push([cx / ringXY.length, cy / ringXY.length]);
+            }
+
+            const kCand = Math.max(1, Math.floor(gridPts.length / 300));
+            const candidates = [];
+            for (let i = 0; i < gridPts.length; i += kCand) candidates.push(gridPts[i]);
+
+            return { proj, gridPts, candidates, step };
+        }
+
+        const GRID_CACHE = new Map();
+        const FLEET_CACHE = new Map();
+
+        function getDemandGrid(polygonPts) {
+            const key = polygonSignature(polygonPts);
+            let grid = GRID_CACHE.get(key);
+            if (!grid) {
+                grid = buildDemandGrid(polygonPts);
+                if (GRID_CACHE.size >= CACHE_LIMIT) GRID_CACHE.clear();
+                GRID_CACHE.set(key, grid);
+            }
+            return grid;
+        }
+
+        // Ordre de déploiement : 1 drone N2 pour 4 drones N1, les N2 en premier.
+        // Le placement réel rejoue exactement cette séquence, donc la flotte
+        // recommandée est un préfixe exact du placement.
+        function buildTypeOrder(smallCount, largeCount) {
+            const order = [];
+            let smalls = Math.max(0, Math.floor(smallCount) || 0);
+            let larges = Math.max(0, Math.floor(largeCount) || 0);
+            const groupSize = N1_PER_N2 + 1;
+            for (let i = 0; smalls + larges > 0; i++) {
+                if (i % groupSize === 0 && larges > 0) { order.push("large"); larges--; continue; }
+                if (smalls > 0) { order.push("small"); smalls--; continue; }
+                if (larges > 0) { order.push("large"); larges--; }
+            }
+            return order;
+        }
+
+        // Glouton unique : chaque drone est posé sur la position candidate qui couvre
+        // le plus de points encore découverts. Arrêt dès que la couverture visée est
+        // atteinte (sauf si stopAtTarget est désactivé) et, pour la flotte mixte,
+        // uniquement en fin de groupe complet afin de tenir le ratio annoncé.
+        function placeDrones(grid, typeOrder, options) {
+            const opts = options || {};
+            const targetPct = opts.targetPct == null ? 100 : opts.targetPct;
+            const maxDrones = Math.min(opts.maxDrones || SIMULATION_MAX_DRONES, typeOrder.length);
+            const groupSize = opts.groupSize || 0;
+            const stopAtTarget = opts.stopAtTarget !== false;
+            const stopOnStall = opts.stopOnStall !== false;
+            const gridPts = grid.gridPts;
+            const candidates = grid.candidates;
+            const covered = new Uint8Array(gridPts.length);
+            const placed = [];
+            let coveredCount = 0;
+
+            const coveragePct = () => gridPts.length > 0 ? (coveredCount / gridPts.length) * 100 : 0;
+
+            for (let step = 0; step < maxDrones; step++) {
+                const groupAligned = groupSize > 0 ? (step % groupSize === 0) : true;
+                if (stopAtTarget && step > 0 && groupAligned && coveragePct() >= targetPct) break;
+
+                const type = typeOrder[step] === "large" ? "large" : "small";
+                const radius = type === "large" ? DRONE_N2.radius : DRONE_N1.radius;
+                const r2 = radius * radius;
+
+                let bestGain = -1;
+                let bestPoint = candidates[0] || [0, 0];
+                for (let c = 0; c < candidates.length; c++) {
+                    const cx = candidates[c][0], cy = candidates[c][1];
+                    let gain = 0;
+                    for (let i = 0; i < gridPts.length; i++) {
+                        if (covered[i] === 0) {
+                            const dx = gridPts[i][0] - cx, dy = gridPts[i][1] - cy;
+                            if (dx * dx + dy * dy <= r2) gain++;
+                        }
+                    }
+                    if (gain > bestGain) { bestGain = gain; bestPoint = candidates[c]; }
+                }
+
+                const px = bestPoint[0], py = bestPoint[1];
+                for (let i = 0; i < gridPts.length; i++) {
+                    if (covered[i] === 0) {
+                        const dx = gridPts[i][0] - px, dy = gridPts[i][1] - py;
+                        if (dx * dx + dy * dy <= r2) { covered[i] = 1; coveredCount++; }
+                    }
+                }
+
+                placed.push({
+                    type,
+                    radius,
+                    color: type === "large" ? DRONE_N2.color : DRONE_N1.color,
+                    x: px,
+                    y: py,
+                    latLng: grid.proj.toLatLng(px, py)
+                });
+
+                if (stopOnStall && bestGain <= 0) {
+                    const endOfGroup = groupSize === 0 || placed.length % groupSize === 0;
+                    if (endOfGroup) break;
+                }
+            }
+
+            let smallCount = 0, largeCount = 0;
+            placed.forEach(d => { if (d.type === "large") largeCount++; else smallCount++; });
+
+            return {
+                placed,
+                coverageRatio: gridPts.length > 0 ? coveredCount / gridPts.length : 0,
+                coveragePct: coveragePct(),
+                smallCount,
+                largeCount
+            };
+        }
+
+        // 3a. Nombre minimal RÉEL de drones d'un seul type pour tenir la couverture visée.
+        function estimateDronesForTarget(polygonPts, radius, targetPct) {
+            const grid = getDemandGrid(polygonPts);
+            const isLarge = radius >= DRONE_N2.radius;
+            const order = buildTypeOrder(isLarge ? 0 : SIMULATION_MAX_DRONES, isLarge ? SIMULATION_MAX_DRONES : 0);
+            const sim = placeDrones(grid, order, { targetPct, maxDrones: SIMULATION_MAX_DRONES });
+            return {
+                count: Math.max(1, sim.placed.length),
+                coveredRatio: sim.coverageRatio,
+                achievedPct: sim.coveragePct,
+                gridTotal: grid.gridPts.length
+            };
+        }
+
+        // 3b. Flotte mixte : 1 drone N2 pour 4 drones N1. L'arrêt est évalué en fin de
+        //     groupe complet afin que le ratio 4:1 annoncé et la couverture visée soient
+        //     réellement tenus lors du placement.
+        function computeMixedFleet(polygonPts, targetPct) {
+            const grid = getDemandGrid(polygonPts);
+            const groupSize = N1_PER_N2 + 1;
+            const groups = Math.max(1, Math.floor(SIMULATION_MAX_DRONES / groupSize));
+            const order = buildTypeOrder(groups * N1_PER_N2, groups);
+            const sim = placeDrones(grid, order, {
+                targetPct,
+                maxDrones: order.length,
+                groupSize
+            });
+            const n2 = sim.largeCount;
+            const n1 = sim.smallCount;
+            const total = n1 + n2;
+            return {
+                n1,
+                n2,
+                total,
+                coveredRatio: sim.coverageRatio,
+                achievedPct: Math.round(sim.coveragePct),
+                pctN1: total > 0 ? Math.round((n1 / total) * 100) : 0,
+                pctN2: total > 0 ? Math.round((n2 / total) * 100) : 0
+            };
+        }
+
+        // 3c. Dimensionnement de flotte : simulation du placement réel dès qu'une zone
+        //     est dessinée (le nombre annoncé est celui qui atteint la couverture visée),
+        //     sinon estimation théorique avec coefficient de recouvrement géométrique.
+        function fleetOption(count, coveredRatio, areaKm2, drone) {
+            const ratio = Math.max(0, Math.min(1, coveredRatio || 0));
+            return {
+                count,
+                coveredArea: count * drone.areaKm2,
+                coveredKm2: ratio * areaKm2,
+                achievedPct: Math.round(ratio * 100)
+            };
+        }
+
+        function calculateFleetRequirements(areaKm2, coveragePercent) {
+            const safeArea = Math.max(0, areaKm2);
+            const safeCoverage = Math.max(1, Math.min(100, coveragePercent));
+            const targetAreaKm2 = safeArea * (safeCoverage / 100);
+            const overlapFactor = geometricOverlapFactor(safeCoverage);
+            const hasPolygon = state.polygonAdded && state.polygonPoints.length >= 3;
+
+            if (targetAreaKm2 <= 0) {
+                return {
+                    areaKm2: safeArea,
+                    coveragePercent: safeCoverage,
+                    targetAreaKm2: 0,
+                    overlapFactor,
+                    method: hasPolygon ? "simulation" : "coefficient",
+                    n1Only: { count: 0, coveredArea: 0, coveredKm2: 0, achievedPct: 0 },
+                    n2Only: { count: 0, coveredArea: 0, coveredKm2: 0, achievedPct: 0 },
+                    mixed: { n1: 0, n2: 0, total: 0, coveredArea: 0, coveredKm2: 0, achievedPct: 0, pctN1: 0, pctN2: 0 }
+                };
+            }
+
+            const cacheKey = safeArea.toFixed(3) + "|" + safeCoverage + "|" +
+                (hasPolygon ? polygonSignature(state.polygonPoints) : "aucune");
+
+            const cached = FLEET_CACHE.get(cacheKey);
+            if (cached) return cached;
+
+            let fleet;
+
+            if (hasPolygon) {
+                // --- Simulation du placement réel : grille et glouton identiques à l'étape 3 ---
+                const n1 = estimateDronesForTarget(state.polygonPoints, DRONE_N1.radius, safeCoverage);
+                const n2 = estimateDronesForTarget(state.polygonPoints, DRONE_N2.radius, safeCoverage);
+                const mix = computeMixedFleet(state.polygonPoints, safeCoverage);
+
+                fleet = {
+                    areaKm2: safeArea,
+                    coveragePercent: safeCoverage,
+                    targetAreaKm2,
+                    overlapFactor,
+                    method: "simulation",
+                    n1Only: fleetOption(n1.count, n1.coveredRatio, safeArea, DRONE_N1),
+                    n2Only: fleetOption(n2.count, n2.coveredRatio, safeArea, DRONE_N2),
+                    mixed: {
+                        n1: mix.n1,
+                        n2: mix.n2,
+                        total: mix.total,
+                        coveredArea: mix.n1 * DRONE_N1.areaKm2 + mix.n2 * DRONE_N2.areaKm2,
+                        coveredKm2: mix.coveredRatio * safeArea,
+                        achievedPct: mix.achievedPct,
+                        pctN1: mix.pctN1,
+                        pctN2: mix.pctN2
+                    }
+                };
+            } else {
+                // --- Repli théorique : couvrir une surface avec des cercles impose un
+                //     chevauchement et des débordements hors zone, d'où le coefficient. ---
+                const effectiveAreaKm2 = safeArea * overlapFactor;
+                const n1Count = Math.max(1, Math.ceil(effectiveAreaKm2 / DRONE_N1.areaKm2));
+                const n2Count = Math.max(1, Math.ceil(effectiveAreaKm2 / DRONE_N2.areaKm2));
+                const groups = Math.max(1, Math.ceil(n1Count / N1_PER_N2));
+                const mixedTotal = groups * (N1_PER_N2 + 1);
+
+                fleet = {
+                    areaKm2: safeArea,
+                    coveragePercent: safeCoverage,
+                    targetAreaKm2,
+                    overlapFactor,
+                    method: "coefficient",
+                    n1Only: fleetOption(n1Count, safeCoverage / 100, safeArea, DRONE_N1),
+                    n2Only: fleetOption(n2Count, safeCoverage / 100, safeArea, DRONE_N2),
+                    mixed: {
+                        n1: groups * N1_PER_N2,
+                        n2: groups,
+                        total: mixedTotal,
+                        coveredArea: groups * (N1_PER_N2 * DRONE_N1.areaKm2 + DRONE_N2.areaKm2),
+                        coveredKm2: targetAreaKm2,
+                        achievedPct: Math.round(safeCoverage),
+                        pctN1: Math.round((N1_PER_N2 / (N1_PER_N2 + 1)) * 100),
+                        pctN2: Math.round((1 / (N1_PER_N2 + 1)) * 100)
+                    }
+                };
+            }
+
+            if (FLEET_CACHE.size >= CACHE_LIMIT) FLEET_CACHE.clear();
+            FLEET_CACHE.set(cacheKey, fleet);
+            return fleet;
+        }
+
+        // 4. Moteur de placement (Étape 3) : réutilise la grille et le glouton communs.
+        //    L'ordre de déploiement (1 N2 pour 4 N1) est celui utilisé par le
+        //    dimensionnement : la flotte recommandée est donc un préfixe exact.
+        function runAutonomousPlacement(polygonPts, smallCount, largeCount) {
+            if (!polygonPts || polygonPts.length < 3) throw new Error("Aucune zone d'opération n'est définie.");
+            if (smallCount + largeCount === 0) throw new Error("Sélectionnez au moins 1 drone à positionner.");
+
+            const grid = getDemandGrid(polygonPts);
+            const typeOrder = buildTypeOrder(smallCount, largeCount);
+            const sim = placeDrones(grid, typeOrder, {
+                maxDrones: typeOrder.length,
+                stopAtTarget: false,
+                stopOnStall: false
+            });
+
+            return {
+                placed: sim.placed,
+                coverageRatio: sim.coverageRatio,
+                gridTotal: grid.gridPts.length
+            };
+        }
+
+        // 5. Affichage du placement sur Leaflet
+        function renderPlacementOnMap(placedDrones) {
+            placementLayer.clearLayers();
+
+            // A. Cercles de portée des drones
+            placedDrones.forEach((d, idx) => {
+                L.circle(d.latLng, {
+                    radius: d.radius,
+                    color: d.color,
+                    weight: 2,
+                    fillColor: d.color,
+                    fillOpacity: 0.12,
+                    interactive: false
+                }).addTo(placementLayer);
+            });
+
+            // B. Détection des chevauchements / zones rouges
+            let overlapPairs = 0;
+            for (let i = 0; i < placedDrones.length; i++) {
+                for (let j = i + 1; j < placedDrones.length; j++) {
+                    const d1 = placedDrones[i], d2 = placedDrones[j];
+                    const dist = Math.hypot(d1.x - d2.x, d1.y - d2.y);
+                    if (dist < d1.radius + d2.radius) {
+                        overlapPairs++;
+                        if (typeof turf !== "undefined") {
+                            try {
+                                const c1 = turf.circle([d1.latLng[1], d1.latLng[0]], d1.radius / 1000, { steps: 60, units: "kilometers" });
+                                const c2 = turf.circle([d2.latLng[1], d2.latLng[0]], d2.radius / 1000, { steps: 60, units: "kilometers" });
+                                const inter = turf.intersect(turf.featureCollection([c1, c2])) || turf.intersect(c1, c2);
+                                if (inter) {
+                                    L.geoJSON(inter, {
+                                        style: { color: "#ff1744", weight: 1.5, fillColor: "#ff1744", fillOpacity: 0.35 },
+                                        interactive: false
+                                    }).addTo(placementLayer);
+                                }
+                            } catch (e) { }
+                        }
+                    }
+                }
+            }
+
+            // C. Marqueurs des télépilotes avec tooltips
+            placedDrones.forEach((d, idx) => {
+                const marker = L.circleMarker(d.latLng, {
+                    radius: 7,
+                    color: "#ffffff",
+                    weight: 2,
+                    fillColor: d.color,
+                    fillOpacity: 1
+                }).addTo(placementLayer);
+
+                marker.bindTooltip(`<b>Drone #${idx + 1}</b><br>Type: ${d.radius / 1000} km`, {
+                    className: "custom-tooltip",
+                    direction: "top",
+                    offset: [0, -8]
+                });
+            });
+
+            return { overlapPairs };
+        }
+
+        // 6. Mise à jour de l'UI
+        function updateUI() {
+            const hasPolygon = state.polygonAdded && state.polygonPoints.length >= 3;
+            const areaKm2 = hasPolygon ? calculatePolygonAreaKm2(state.polygonPoints) : 0;
+
+            // Badges zone
+            const zoneBadge = $("zone-status-badge");
+            const fleetBadge = $("fleet-area-badge");
+            const waitingBlock = $("fleet-waiting-block");
+            const activeBlock = $("fleet-active-block");
+
+            if (hasPolygon) {
+                zoneBadge.textContent = `${areaKm2.toFixed(1)} km²`;
+                zoneBadge.className = "rounded bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 text-[10px] font-semibold";
+
+                fleetBadge.textContent = `${areaKm2.toFixed(1)} km²`;
+                fleetBadge.className = "rounded bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 text-[10px] font-semibold";
+
+                waitingBlock.classList.add("hidden");
+                activeBlock.classList.remove("hidden");
+
+                $("fleet-area-val").textContent = `${areaKm2.toFixed(2)} km²`;
+
+                // Recalcul des cartes
+                const fleet = calculateFleetRequirements(areaKm2, state.targetCoverage);
+                $("coverage-slider-val").textContent = `${state.targetCoverage}%`;
+                $("coverage-target-area").textContent = `(${fleet.targetAreaKm2.toFixed(2)} km²)`;
+
+                $("card-n1-count").textContent = fleet.n1Only.count;
+                $("card-n1-area").textContent = `Couvre ${fleet.n1Only.coveredKm2.toFixed(1)} km² (${fleet.n1Only.achievedPct} %)`;
+
+                $("card-n2-count").textContent = fleet.n2Only.count;
+                $("card-n2-area").textContent = `Couvre ${fleet.n2Only.coveredKm2.toFixed(1)} km² (${fleet.n2Only.achievedPct} %)`;
+
+                $("card-mixed-count").textContent = fleet.mixed.total;
+                $("card-mixed-area").textContent = `Couvre ${fleet.mixed.coveredKm2.toFixed(1)} km² (${fleet.mixed.achievedPct} %)`;
+                $("card-mixed-n1").textContent = `${fleet.mixed.n1} × N1 (${fleet.mixed.pctN1}%)`;
+                $("card-mixed-n2").textContent = `${fleet.mixed.n2} × N2 (${fleet.mixed.pctN2}%)`;
+                $("card-mixed-ratio").textContent = `Ratio ${fleet.mixed.pctN1}/${fleet.mixed.pctN2}`;
+
+                // Mention discrète : recouvrement géométrique et effets de bord
+                const overlapNote = $("fleet-overlap-note");
+                if (overlapNote) {
+                    overlapNote.textContent = fleet.method === "simulation"
+                        ? "Simulation du placement réel : recouvrement géométrique entre cercles (~30 %) et effets de bord pris en compte. La couverture annoncée est celle réellement obtenue après placement."
+                        : `Estimation théorique : coefficient de recouvrement géométrique de ~${Math.round((fleet.overlapFactor - 1) * 100)} % appliqué à la zone (des cercles ne peuvent couvrir une surface sans se chevaucher).`;
+                }
+
+                // Boutons presets
+                document.querySelectorAll(".preset-btn").forEach(btn => {
+                    const p = Number(btn.dataset.preset);
+                    if (p === state.targetCoverage) {
+                        btn.className = "preset-btn rounded px-1.5 py-0.5 text-[9px] font-medium transition bg-aeris text-white";
+                    } else {
+                        btn.className = "preset-btn rounded px-1.5 py-0.5 text-[9px] font-medium transition bg-notion-100 text-notion-600 hover:bg-notion-200";
+                    }
+                });
+            } else {
+                zoneBadge.textContent = "À définir";
+                zoneBadge.className = "rounded bg-notion-100 px-1.5 py-0.5 text-[10px] font-medium text-notion-500";
+
+                fleetBadge.textContent = "Zone requise";
+                fleetBadge.className = "rounded bg-notion-100 px-1.5 py-0.5 text-[10px] font-medium text-notion-500";
+
+                waitingBlock.classList.remove("hidden");
+                activeBlock.classList.add("hidden");
+            }
+
+            // Bouton dessiner
+            $("add-zone-text").textContent = state.drawingPolygon ? "En cours…" : (hasPolygon ? "Redessiner" : "Dessiner zone");
+            $("finish-zone-btn").classList.toggle("hidden", !state.drawingPolygon);
+            $("finish-zone-btn").textContent = `Valider la zone (${state.polygonPoints.length} points)`;
+            $("finish-zone-btn").disabled = state.polygonPoints.length < 3;
+
+            // Total drones inputs
+            $("total-drones-count").textContent = `${state.smallDrones + state.largeDrones} drones`;
+            $("small-drones-input").value = state.smallDrones;
+            $("large-drones-input").value = state.largeDrones;
+        }
+
+        // 7. Rendu du polygone sur la carte
+        function renderPolygonLayers() {
+            missionLayer.clearLayers();
+            draftLayer.clearLayers();
+
+            if (!state.polygonPoints.length) return;
+
+            if (state.polygonAdded) {
+                L.polygon(state.polygonPoints, {
+                    color: "#238b82",
+                    weight: 2,
+                    dashArray: "6 5",
+                    fillColor: "#238b82",
+                    fillOpacity: 0.18
+                }).addTo(missionLayer);
+            } else {
+                L.polyline(state.polygonPoints, {
+                    color: "#238b82",
+                    weight: 2,
+                    dashArray: "5 5"
+                }).addTo(draftLayer);
+
+                state.polygonPoints.forEach(p => {
+                    L.circleMarker(p, {
+                        radius: 5,
+                        color: "#238b82",
+                        weight: 2,
+                        fillColor: "#ffffff",
+                        fillOpacity: 1
+                    }).addTo(draftLayer);
+                });
+            }
+        }
+
+        // 8. Gestion des Événements
+
+        // A. Zone de test par défaut
+        $("default-zone-btn").addEventListener("click", () => {
+            state.polygonPoints = DEFAULT_DEMO_POLYGON.map(p => [...p]);
+            state.polygonAdded = true;
+            state.drawingPolygon = false;
+            placementLayer.clearLayers();
+            $("placement-results").classList.add("hidden");
+            $("placement-error").classList.add("hidden");
+
+            renderPolygonLayers();
+            map.fitBounds(L.latLngBounds(state.polygonPoints), { padding: [50, 50], maxZoom: 15 });
+            updateUI();
+            showHint("⚡ Zone de test chargée (Mirepoix · 35.7 km²)");
+        });
+
+        // B. Dessin manuel du polygone
+        $("add-zone-btn").addEventListener("click", () => {
+            state.drawingPolygon = true;
+            state.polygonPoints = [];
+            state.polygonAdded = false;
+            placementLayer.clearLayers();
+            $("placement-results").classList.add("hidden");
+            $("placement-error").classList.add("hidden");
+
+            renderPolygonLayers();
+            updateUI();
+            showHint("Cliquez sur la carte pour tracer les sommets du polygone");
+        });
+
+        map.on("click", (e) => {
+            if (!state.drawingPolygon) return;
+            state.polygonPoints.push([e.latlng.lat, e.latlng.lng]);
+            renderPolygonLayers();
+            updateUI();
+        });
+
+        $("finish-zone-btn").addEventListener("click", () => {
+            if (state.polygonPoints.length < 3) return;
+            state.drawingPolygon = false;
+            state.polygonAdded = true;
+            renderPolygonLayers();
+            map.fitBounds(L.latLngBounds(state.polygonPoints), { padding: [50, 50], maxZoom: 15 });
+            updateUI();
+            showHint("Zone de mission enregistrée avec succès");
+        });
+
+        // C. Curseur de couverture
+        $("coverage-slider").addEventListener("input", (e) => {
+            state.targetCoverage = Number(e.target.value);
+            updateUI();
+        });
+
+        document.querySelectorAll(".preset-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                state.targetCoverage = Number(btn.dataset.preset);
+                $("coverage-slider").value = state.targetCoverage;
+                updateUI();
+            });
+        });
+
+        // D. Application des résultats de flotte vers l'Étape 3
+        $("apply-n1-btn").addEventListener("click", () => {
+            const areaKm2 = calculatePolygonAreaKm2(state.polygonPoints);
+            const fleet = calculateFleetRequirements(areaKm2, state.targetCoverage);
+            state.smallDrones = fleet.n1Only.count;
+            state.largeDrones = 0;
+            updateUI();
+            showHint(`Flotte configurée : ${fleet.n1Only.count} drone(s) N1`);
+        });
+
+        $("apply-n2-btn").addEventListener("click", () => {
+            const areaKm2 = calculatePolygonAreaKm2(state.polygonPoints);
+            const fleet = calculateFleetRequirements(areaKm2, state.targetCoverage);
+            state.smallDrones = 0;
+            state.largeDrones = fleet.n2Only.count;
+            updateUI();
+            showHint(`Flotte configurée : ${fleet.n2Only.count} drone(s) N2`);
+        });
+
+        $("apply-mixed-btn").addEventListener("click", () => {
+            const areaKm2 = calculatePolygonAreaKm2(state.polygonPoints);
+            const fleet = calculateFleetRequirements(areaKm2, state.targetCoverage);
+            state.smallDrones = fleet.mixed.n1;
+            state.largeDrones = fleet.mixed.n2;
+            updateUI();
+            showHint(`Flotte mixte configurée : ${fleet.mixed.n1} N1 + ${fleet.mixed.n2} N2`);
+        });
+
+        // E. Changement manuel du nombre de drones
+        $("small-drones-input").addEventListener("input", (e) => {
+            state.smallDrones = Math.max(0, parseInt(e.target.value, 10) || 0);
+            updateUI();
+        });
+        $("large-drones-input").addEventListener("input", (e) => {
+            state.largeDrones = Math.max(0, parseInt(e.target.value, 10) || 0);
+            updateUI();
+        });
+
+        // F. Lancement du Placement (100% autonome et sans erreur)
+        $("launch-placement-btn").addEventListener("click", () => {
+            const errDiv = $("placement-error");
+            const resDiv = $("placement-results");
+            errDiv.classList.add("hidden");
+            resDiv.classList.add("hidden");
+
+            try {
+                if (!state.polygonAdded || state.polygonPoints.length < 3) {
+                    throw new Error("Veuillez d'abord définir une zone (ou cliquez sur 'Zone de test').");
+                }
+                if (state.smallDrones + state.largeDrones === 0) {
+                    throw new Error("Indiquez au moins 1 drone (1 km ou 2 km).");
+                }
+
+                $("launch-placement-btn").disabled = true;
+                $("launch-placement-btn").textContent = "Calcul en cours…";
+
+                setTimeout(() => {
+                    try {
+                        const result = runAutonomousPlacement(state.polygonPoints, state.smallDrones, state.largeDrones);
+                        const collisionData = renderPlacementOnMap(result.placed);
+
+                        // Affichage des statistiques
+                        resDiv.classList.remove("hidden");
+                        const achievedPct = Math.round(result.coverageRatio * 100);
+                        $("res-target-pct").textContent = `${state.targetCoverage}%`;
+                        $("res-cov-pct").textContent = `${achievedPct}%`;
+                        $("res-drones-count").textContent = result.placed.length;
+                        $("res-overlap-pairs").textContent = `${collisionData.overlapPairs} paire(s)`;
+
+                        showHint(achievedPct >= state.targetCoverage
+                            ? `Placement réussi : ${result.placed.length} drones positionnés (${achievedPct} % couverts, objectif ${state.targetCoverage} %)`
+                            : `Placement terminé : ${result.placed.length} drones positionnés (${achievedPct} % couverts pour ${state.targetCoverage} % visés)`);
+                    } catch (calcErr) {
+                        errDiv.textContent = calcErr.message;
+                        errDiv.classList.remove("hidden");
+                    } finally {
+                        $("launch-placement-btn").disabled = false;
+                        $("launch-placement-btn").textContent = "🚀 Lancer le placement";
+                    }
+                }, 40);
+            } catch (err) {
+                errDiv.textContent = err.message;
+                errDiv.classList.remove("hidden");
+            }
+        });
+
+        // Effacer placement
+        $("clear-placement-btn").addEventListener("click", () => {
+            placementLayer.clearLayers();
+            $("placement-results").classList.add("hidden");
+            showHint("Placement effacé de la carte");
+        });
+
+        // Réinitialiser la carte
+        $("reset-btn").addEventListener("click", () => {
+            state.polygonPoints = [];
+            state.polygonAdded = false;
+            state.drawingPolygon = false;
+            state.smallDrones = 3;
+            state.largeDrones = 2;
+            state.targetCoverage = 80;
+
+            missionLayer.clearLayers();
+            draftLayer.clearLayers();
+            placementLayer.clearLayers();
+
+            $("placement-results").classList.add("hidden");
+            $("placement-error").classList.add("hidden");
+            map.setView([43.09, 1.87], 12);
+            updateUI();
+            showHint("Dispositif réinitialisé");
+        });
+
+        // Zoom & recentrage
+        $("zoom-in").addEventListener("click", () => map.zoomIn());
+        $("zoom-out").addEventListener("click", () => map.zoomOut());
+        $("recenter-btn").addEventListener("click", () => {
+            if (state.polygonPoints.length >= 3) {
+                map.fitBounds(L.latLngBounds(state.polygonPoints), { padding: [50, 50], maxZoom: 15 });
+            } else {
+                map.setView([43.09, 1.87], 12);
+            }
+        });
+
+        // === AUTO-TEST TEMPORAIRE (retiré après vérification) ===
+        if (location.hash === "#t") {
+            state.polygonPoints = DEFAULT_DEMO_POLYGON.map(p => [...p]);
+            state.polygonAdded = true;
+            const a = calculatePolygonAreaKm2(state.polygonPoints);
+            const out = ["Zone " + a.toFixed(2) + " km2"];
+            [80, 90, 100].forEach(p => {
+                const f = calculateFleetRequirements(a, p);
+                const r1 = runAutonomousPlacement(state.polygonPoints, f.n1Only.count, 0);
+                const r2 = runAutonomousPlacement(state.polygonPoints, 0, f.n2Only.count);
+                const rm = runAutonomousPlacement(state.polygonPoints, f.mixed.n1, f.mixed.n2);
+                out.push(p + "% N1:" + f.n1Only.count + "->" + Math.round(r1.coverageRatio * 100)
+                    + "% N2:" + f.n2Only.count + "->" + Math.round(r2.coverageRatio * 100)
+                    + "% mixte:" + f.mixed.n1 + "+" + f.mixed.n2 + "->" + Math.round(rm.coverageRatio * 100) + "%");
+            });
+            const hintBox = $("map-hint");
+            const hintText = $("map-hint-text");
+            hintText.style.fontSize = "11px";
+            hintText.textContent = out.join("   |   ");
+            hintBox.classList.remove("hidden");
+            clearTimeout(window._hintTimer);
+        }
+
+        // Toggle panneau gauche
+        $("toggle-left").addEventListener("click", () => {
+            state.leftMenuOpen = !state.leftMenuOpen;
+            const panel = $("left-panel");
+            if (state.leftMenuOpen) {
+                panel.classList.remove("-translate-x-[calc(100%+1rem)]", "opacity-0", "pointer-events-none");
+                panel.classList.add("translate-x-0", "opacity-100");
+            } else {
+                panel.classList.add("-translate-x-[calc(100%+1rem)]", "opacity-0", "pointer-events-none");
+                panel.classList.remove("translate-x-0", "opacity-100");
+            }
+        });
+
+        // Initialisation UI
+        updateUI();
+    })();
+    </script>
 </body>
 
 </html>

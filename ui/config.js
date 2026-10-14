@@ -13,5 +13,15 @@ export const SELECTORS = {
   app: '#app',
   map: '#map',
   mapHint: '#map-hint',
-  finishZone: '#finish-zone'
+  finishZone: '#finish-zone',
+  defaultZoneBtn: '#default-zone-btn'
 };
+
+export const DEFAULT_DEMO_POLYGON = [
+  [43.115, 1.845],
+  [43.120, 1.905],
+  [43.085, 1.925],
+  [43.060, 1.880],
+  [43.070, 1.830]
+];
+

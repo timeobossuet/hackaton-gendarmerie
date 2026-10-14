@@ -19,7 +19,9 @@ export const state = {
     areaWeight: 1,
     calculating: false,
     placement: null,
-    placementError: null
+    placementError: null,
+    targetCoverage: 80,
+    fleetMixRatio: 0.8
   },
   zoomSensitivity: MAP_CONFIG.defaultZoomSensitivity,
   zoomSettingsOpen: false,

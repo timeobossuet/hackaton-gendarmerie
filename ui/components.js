@@ -1,6 +1,12 @@
 import { MAP_CONFIG } from './config.js';
 import { state } from './state.js';
 import { componentIcon } from './icons.js';
+import {
+  calculatePolygonAreaKm2,
+  calculateFleetRequirements,
+  DRONE_N1,
+  DRONE_N2
+} from './planning/calculator.js';
 
 export function appShell() {
   return `
@@ -46,7 +52,7 @@ function panelFrame({ side, title, eyebrow, content, open }) {
       <div class="border-b border-notion-200 px-4 py-3">
         <div class="text-[10px] font-semibold uppercase tracking-widest text-notion-400">${eyebrow}</div>
         <h1 class="mt-1 text-sm font-semibold">${title}</h1>
-        ${side === 'left' ? `<p class="mt-1 text-[10px] leading-4 text-notion-500">1. Définissez la zone · 2. Placez les drones</p>` : ''}
+        ${side === 'left' ? `<p class="mt-1 text-[10px] leading-4 text-notion-500">1. Zone de mission · 2. Dimensionnement · 3. Placement</p>` : ''}
       </div>
       <div class="max-h-[calc(100vh-10rem)] overflow-y-auto p-4">${content}</div>
     </aside>
@@ -80,12 +86,18 @@ function leftPanelComponent() {
             <input id="buffer-slider" type="range" min="50" max="1000" step="50" value="${state.planning.bufferMeters}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
           </label>
         ` : `
-          <button id="add-zone" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-notion-400 px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
-            ${componentIcon('map', 'h-4 w-4')} ${state.drawingPolygon ? 'Cliquez sur la carte pour placer les points' : (state.polygonAdded ? 'Modifier la zone' : 'Dessiner la zone')}
-          </button>
+          <div class="mt-3 flex gap-2">
+            <button id="add-zone" type="button" class="flex-1 flex items-center justify-center gap-1.5 rounded-md border border-dashed border-notion-400 px-2 py-2 text-xs font-medium text-notion-700 transition hover:border-aeris hover:bg-[#f1faf8]">
+              ${componentIcon('map', 'h-3.5 w-3.5')} ${state.drawingPolygon ? 'Dessin en cours…' : (state.polygonAdded ? 'Redessiner' : 'Dessiner zone')}
+            </button>
+            <button id="default-zone-btn" type="button" class="flex-1 flex items-center justify-center gap-1 rounded-md border border-aeris/30 bg-aeris/5 px-2 py-2 text-xs font-semibold text-aeris transition hover:bg-aeris hover:text-white shadow-sm" title="Charger la zone de démonstration de Mirepoix (35.7 km²)">
+              ⚡ Zone par défaut
+            </button>
+          </div>
           ${state.drawingPolygon ? `          <button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-aeris px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1b716a] disabled:cursor-not-allowed disabled:opacity-50" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone (${state.polygonPoints.length} points)</button>` : ''}
         `}
       </section>
+      ${fleetCalculatorSectionComponent()}
       <section class="border-t border-notion-200 pt-4">
         <div class="mb-3 flex items-center justify-between">
           <h2 class="text-xs font-semibold">Placement des drones</h2>
@@ -108,7 +120,7 @@ function leftPanelComponent() {
         </label>
         <p class="mt-1 text-[10px] leading-4 text-notion-400">Une valeur élevée répartit davantage les drones dans toute la zone.</p>
         <div class="mt-3 grid grid-cols-2 gap-2">
-          <button id="optimize-placement" type="button" class="rounded-md bg-aeris px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-[#1b716a] disabled:cursor-not-allowed disabled:opacity-50" ${state.planning.calculating || (!state.planning.gpxGeoJson && !state.polygonAdded) ? 'disabled' : ''}>${state.planning.calculating ? 'Placement en cours…' : 'Calculer le placement'}</button>
+          <button id="optimize-placement" type="button" class="col-span-2 rounded-md bg-aeris px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#1b716a] shadow-sm disabled:cursor-not-allowed disabled:opacity-50" ${state.planning.calculating || (!state.planning.gpxGeoJson && !state.polygonAdded) ? 'disabled' : ''}>${state.planning.calculating ? 'Placement en cours…' : '🚀 Lancer le placement'}</button>
         </div>
         ${placementResultComponent(hasProtectedArea)}
       </section>
@@ -214,3 +226,130 @@ function zoomSettingsComponent() {
     </div>
   `;
 }
+
+function fleetCalculatorSectionComponent() {
+  const hasPolygon = state.polygonAdded && state.polygonPoints.length >= 3;
+  const areaKm2 = hasPolygon ? calculatePolygonAreaKm2(state.polygonPoints) : 0;
+  const targetCoverage = state.planning.targetCoverage || 80;
+  const fleet = calculateFleetRequirements(areaKm2, targetCoverage, state.planning.fleetMixRatio || 0.8);
+
+  return `
+    <section class="border-t border-notion-200 pt-4">
+      <div class="mb-2 flex items-center justify-between">
+        <h2 class="text-xs font-semibold">Calculateur de flotte</h2>
+        <span class="rounded ${hasPolygon ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-notion-100 text-notion-500'} px-1.5 py-0.5 text-[10px] font-medium">
+          ${hasPolygon ? `${areaKm2.toFixed(2)} km²` : 'Zone requise'}
+        </span>
+      </div>
+
+      ${hasPolygon ? `
+        <!-- Données de départ & surfaces -->
+        <div class="rounded-md border border-notion-200 bg-notion-50/70 p-2.5 text-[10px] space-y-1 text-notion-600">
+          <div class="flex justify-between items-center text-notion-900 font-medium">
+            <span>Zone d'opération</span>
+            <strong class="text-aeris">${areaKm2.toFixed(2)} km²</strong>
+          </div>
+          <div class="flex justify-between items-center text-[9px] text-notion-500 border-t border-notion-200/60 pt-1">
+            <span>Drone N1 (r=1 km) : <b class="text-notion-700">${DRONE_N1.areaKm2.toFixed(2)} km²</b></span>
+            <span>Drone N2 (r=2 km) : <b class="text-notion-700">${DRONE_N2.areaKm2.toFixed(2)} km²</b></span>
+          </div>
+        </div>
+
+        <!-- Curseur pourcentage de couverture -->
+        <div class="mt-3">
+          <div class="flex items-center justify-between">
+            <label for="fleet-coverage-slider" class="text-[10px] font-semibold text-notion-700">Couverture souhaitée</label>
+            <div class="text-[10px]">
+              <span id="fleet-coverage-value" class="font-bold text-aeris">${targetCoverage}%</span>
+              <span id="fleet-target-area" class="text-notion-400 text-[9px]">(${fleet.targetAreaKm2.toFixed(2)} km²)</span>
+            </div>
+          </div>
+          <input id="fleet-coverage-slider" type="range" min="50" max="100" step="5" value="${targetCoverage}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-notion-200 accent-[#238b82]" />
+          <div class="mt-1 flex items-center justify-between gap-1">
+            <span class="text-[9px] text-notion-400">Paliers rapides :</span>
+            <div class="flex gap-1">
+              <button type="button" data-coverage-preset="80" class="rounded px-1.5 py-0.5 text-[9px] font-medium transition ${targetCoverage === 80 ? 'bg-aeris text-white' : 'bg-notion-100 text-notion-600 hover:bg-notion-200'}">80%</button>
+              <button type="button" data-coverage-preset="90" class="rounded px-1.5 py-0.5 text-[9px] font-medium transition ${targetCoverage === 90 ? 'bg-aeris text-white' : 'bg-notion-100 text-notion-600 hover:bg-notion-200'}">90%</button>
+              <button type="button" data-coverage-preset="100" class="rounded px-1.5 py-0.5 text-[9px] font-medium transition ${targetCoverage === 100 ? 'bg-aeris text-white' : 'bg-notion-100 text-notion-600 hover:bg-notion-200'}">100%</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3 Cartes de résultats -->
+        <div id="fleet-cards-container" class="mt-3 space-y-2">
+          ${renderFleetCards(fleet)}
+        </div>
+      ` : `
+        <div class="rounded-md border border-dashed border-notion-300 bg-notion-50/50 p-3 text-center">
+          <p class="text-[10px] leading-4 text-notion-500">
+            Validez un polygone de zone d'opération sur la carte pour calculer le nombre de drones nécessaires.
+          </p>
+        </div>
+      `}
+    </section>
+  `;
+}
+
+export function renderFleetCards(fleet) {
+  return `
+    <!-- Carte 1 : Drones N1 seuls -->
+    <div class="rounded-md border border-notion-200 bg-white p-2.5 shadow-sm transition hover:border-notion-300">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-semibold text-notion-700">1. Drones N1 seuls (Portée 1 km)</span>
+        <span class="rounded bg-pink-50 text-[#e51e64] border border-pink-200/60 px-1.5 py-0.5 text-[9px] font-semibold">100% N1</span>
+      </div>
+      <div class="mt-1.5 flex items-baseline justify-between">
+        <div>
+          <span class="text-base font-bold text-notion-900">${fleet.n1Only.count}</span>
+          <span class="text-[10px] text-notion-500">drone${fleet.n1Only.count > 1 ? 's' : ''} N1</span>
+        </div>
+        <span class="text-[9px] text-notion-400">Couvre ${fleet.n1Only.coveredArea.toFixed(1)} km²</span>
+      </div>
+      <button type="button" data-apply-fleet="n1" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-notion-200 bg-notion-50 py-1 text-[10px] font-semibold text-notion-700 transition hover:border-aeris hover:bg-aeris hover:text-white">
+        Utiliser cette flotte
+      </button>
+    </div>
+
+    <!-- Carte 2 : Drones N2 seuls -->
+    <div class="rounded-md border border-notion-200 bg-white p-2.5 shadow-sm transition hover:border-notion-300">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-semibold text-notion-700">2. Drones N2 seuls (Portée 2 km)</span>
+        <span class="rounded bg-purple-50 text-[#8e24aa] border border-purple-200/60 px-1.5 py-0.5 text-[9px] font-semibold">100% N2</span>
+      </div>
+      <div class="mt-1.5 flex items-baseline justify-between">
+        <div>
+          <span class="text-base font-bold text-notion-900">${fleet.n2Only.count}</span>
+          <span class="text-[10px] text-notion-500">drone${fleet.n2Only.count > 1 ? 's' : ''} N2</span>
+        </div>
+        <span class="text-[9px] text-notion-400">Couvre ${fleet.n2Only.coveredArea.toFixed(1)} km²</span>
+      </div>
+      <button type="button" data-apply-fleet="n2" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-notion-200 bg-notion-50 py-1 text-[10px] font-semibold text-notion-700 transition hover:border-aeris hover:bg-aeris hover:text-white">
+        Utiliser cette flotte
+      </button>
+    </div>
+
+    <!-- Carte 3 : Flotte mixte (80% N1 / 20% N2) -->
+    <div class="rounded-md border border-aeris/30 bg-[#f7faf9] p-2.5 shadow-sm transition hover:border-aeris">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-semibold text-aeris">3. Flotte mixte N1 + N2</span>
+        <span class="rounded bg-[#238b82]/10 text-aeris border border-[#238b82]/30 px-1.5 py-0.5 text-[9px] font-semibold">Ratio 4/5 (80/20)</span>
+      </div>
+      <div class="mt-1.5 flex items-baseline justify-between">
+        <div>
+          <span class="text-base font-bold text-aeris">${fleet.mixed.total}</span>
+          <span class="text-[10px] text-notion-600">drones au total</span>
+        </div>
+        <span class="text-[9px] text-notion-400">Couvre ${fleet.mixed.coveredArea.toFixed(1)} km²</span>
+      </div>
+      <div class="mt-1 flex items-center justify-between rounded bg-white px-2 py-1 text-[9px] font-medium text-notion-700 border border-notion-200/80">
+        <span class="text-[#e51e64]">${fleet.mixed.n1} × N1 (${fleet.mixed.pctN1}%)</span>
+        <span class="text-notion-300">·</span>
+        <span class="text-[#8e24aa]">${fleet.mixed.n2} × N2 (${fleet.mixed.pctN2}%)</span>
+      </div>
+      <button type="button" data-apply-fleet="mixed" class="mt-2 flex w-full items-center justify-center gap-1.5 rounded bg-aeris py-1 text-[10px] font-semibold text-white transition hover:bg-[#1b716a] shadow-sm">
+        Utiliser cette flotte mixte
+      </button>
+    </div>
+  `;
+}
+
