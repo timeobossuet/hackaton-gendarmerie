@@ -1,6 +1,7 @@
 import { MAP_CONFIG } from './config.js';
 import { state } from './state.js';
 import { componentIcon } from './icons.js';
+import { getLeafletMap } from './map.js';
 
 export function appShell() {
   return `
@@ -16,32 +17,38 @@ export function appShell() {
 function topbarComponent() {
   const activeMission = state.missions.find(({ id }) => id === state.activeMissionId);
   return `
-    <header class="absolute left-0 right-0 top-0 z-[2100] flex h-14 items-center justify-between border-b border-white/20 bg-gendarmerie-navy px-4 text-white shadow-panel">
-      <div class="flex items-center gap-3">
-        <button id="toggle-left" title="Ouvrir ou fermer le menu mission" type="button" class="rounded-md p-2 text-white/75 transition hover:bg-white/10 hover:text-white">
-          ${componentIcon(state.leftMenuOpen ? 'close' : 'menu', 'h-4 w-4')}
-        </button>
-        <div class="flex items-center gap-2 border-l border-white/20 pl-3">
+    <header class="absolute left-0 right-0 top-0 z-[2100] flex h-14 items-center justify-between border-b border-white/20 bg-gendarmerie-navy px-4 text-white shadow-panel print:hidden">
+    
+    <div class="flex items-center gap-3">
+        <!-- Logo + AIGLE (Déplacé en premier, avec la bordure à droite) -->
+        <div class="flex items-center gap-2 border-r border-white/20 pr-3">
           <span class="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-md bg-white">
             <img src="ui/images/logo-gendarmerie.svg" alt="Logo de la Gendarmerie nationale" class="h-full w-full object-contain p-1" />
           </span>
           <div>
-            <div class="text-sm font-semibold leading-none tracking-tight">AERIS</div>
-            <div class="mt-1 text-[10px] text-white/60">Carte de mission</div>
+            <div class="text-sm font-semibold leading-none tracking-tight">AIGLE</div>
           </div>
         </div>
+        
+        <button id="toggle-left" title="Ouvrir ou fermer le menu mission" type="button" class="flex items-center gap-2 rounded-md border border-white/20 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white">
+          ${componentIcon(state.leftMenuOpen ? 'close' : 'menu', 'h-4 w-4')}
+          <span>Configuration</span>
+        </button>
       </div>
+
       <div class="flex items-center gap-2">
         <span class="hidden text-[10px] text-white/60 sm:inline">${state.planning.gpxFileName ? 'Mission en cours' : 'Nouvelle mission'}</span>
-        <button id="export-map" title="Exporter la carte" type="button" class="rounded-md border border-white/20 p-2 text-white/75 transition hover:bg-white/10 hover:text-white">
+        <button id="export-map" title="Exporter la carte" type="button" class="flex items-center gap-2 rounded-md border border-white/20 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white">
           ${componentIcon('download', 'h-4 w-4')}
+          <span>Exporter</span>
         </button>
         <button id="new-mission-top" type="button" class="rounded-md bg-gendarmerie-beige px-2.5 py-1.5 text-[10px] font-semibold text-gendarmerie-navy transition hover:bg-white">Nouvelle mission</button>
         <button id="mission-menu-toggle" aria-expanded="${state.missionMenuOpen}" title="Gérer les missions" type="button" class="flex max-w-[190px] items-center gap-2 rounded-md border border-white/20 px-2.5 py-1.5 text-left text-xs text-white transition hover:bg-white/10">
           <span class="truncate">${escapeHtml(activeMission?.name || 'Mission')}</span><span class="text-white/60">⌄</span>
         </button>
-        <button id="toggle-right" title="Ouvrir ou fermer les options de la carte" type="button" class="rounded-md border border-white/20 p-2 text-white/75 transition hover:bg-white/10 hover:text-white">
+        <button id="toggle-right" title="Ouvrir ou fermer les options de la carte" type="button" class="flex items-center gap-2 rounded-md border border-white/20 px-3 py-1.5 text-xs text-white/75 transition hover:bg-white/10 hover:text-white">
           ${componentIcon(state.rightMenuOpen ? 'close' : 'layers', 'h-4 w-4')}
+          <span>Meteo</span>
         </button>
       </div>
       ${state.missionMenuOpen ? missionMenuComponent() : ''}
@@ -84,11 +91,10 @@ function panelFrame({ side, title, eyebrow, content, open }) {
   const hiddenPosition = side === 'left' ? '-translate-x-[calc(100%+1rem)]' : 'translate-x-[calc(100%+1rem)]';
 
   return `
-    <aside class="absolute ${position} top-16 z-[2000] w-[calc(100vw-2rem)] max-w-[300px] rounded-lg border border-notion-200 bg-white/95 shadow-panel backdrop-blur transition-all duration-200 ${open ? 'translate-x-0 opacity-100' : `${hiddenPosition} pointer-events-none opacity-0`}">
+    <aside class="absolute ${position} top-16 z-[2000] w-[calc(100vw-2rem)] max-w-[300px] rounded-lg border border-notion-200 bg-white/95 shadow-panel backdrop-blur transition-all duration-200${open ? 'translate-x-0 opacity-100' : `${hiddenPosition} pointer-events-none opacity-0`} print:hidden">
       <div class="border-b border-notion-200 px-4 py-3">
         <div class="text-[10px] font-bold uppercase tracking-widest text-gendarmerie-blue">${eyebrow}</div>
         <h1 class="mt-1 text-sm font-semibold">${title}</h1>
-        ${side === 'left' ? `<p class="mt-1 text-[10px] leading-4 text-notion-500">1. Définissez la zone · 2. Placez les drones</p>` : ''}
       </div>
       <div class="max-h-[calc(100vh-10rem)] overflow-y-auto p-4">${content}</div>
     </aside>
@@ -100,13 +106,13 @@ function leftPanelComponent() {
   const content = `
     <div class="space-y-3">
       <details open class="group">
-        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>1. Définir le chemin</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
+        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>1. Exporter le chemin</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
         <section class="pt-2">
         <div class="mb-2 flex items-center justify-between">
-          <h2 class="text-xs font-semibold">Chemin à protéger</h2>
+          <h2 class="text-xs font-semibold">Etat :</h2>
           <span class="rounded bg-notion-100 px-1.5 py-0.5 text-[10px] text-notion-500">${state.planning.gpxFileName ? 'Chemin chargé' : 'À faire'}</span>
         </div>
-        <p class="text-xs leading-5 text-gray-500">Ajoutez un fichier GPX pour définir le chemin à protéger. La carte se centrera automatiquement dessus.</p>
+        <p class="text-xs leading-5 text-gray-500">Ajoutez un fichier GPX pour définir le tracé. La carte se centrera automatiquement dessus.</p>
         <input id="gpx-file" type="file" accept=".gpx,application/gpx+xml" class="hidden" />
         <button id="import-gpx" type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-gendarmerie-beige px-3 py-2 text-xs font-medium text-notion-700 transition hover:border-gendarmerie-blue hover:bg-gendarmerie-beige/30">
           ${componentIcon('download', 'h-4 w-4')} ${state.planning.gpxFileName ? 'Remplacer le fichier GPX' : 'Ajouter un fichier GPX'}
@@ -115,14 +121,14 @@ function leftPanelComponent() {
         </section>
       </details>
       <details open class="group border-t border-notion-200 pt-3">
-        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>2. Définir la zone protégée</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
+        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>2. Option du chemin</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
         <section class="pt-2">
         <div class="grid grid-cols-2 gap-1 rounded-md bg-gendarmerie-beige/45 p-1 text-[10px]">
           <button id="area-buffer" type="button" aria-pressed="${state.planning.areaMode === 'buffer'}" class="rounded px-2 py-1.5 transition ${state.planning.areaMode === 'buffer' ? 'bg-white font-semibold text-notion-900 shadow-sm' : 'text-notion-500 hover:text-notion-900'}">Autour du chemin</button>
           <button id="area-polygon" type="button" aria-pressed="${state.planning.areaMode === 'polygon'}" class="rounded px-2 py-1.5 transition ${state.planning.areaMode === 'polygon' ? 'bg-white font-semibold text-notion-900 shadow-sm' : 'text-notion-500 hover:text-notion-900'}">Dessiner une zone</button>
         </div>
         ${state.planning.areaMode === 'buffer' ? `
-          <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Distance autour du chemin</span><strong id="buffer-value" class="font-semibold text-notion-800">${state.planning.bufferMeters} m</strong></span>
+          <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Largeur autour du chemin</span><strong id="buffer-value" class="font-semibold text-notion-800">${state.planning.bufferMeters} m</strong></span>
               <input id="buffer-slider" type="range" min="50" max="1000" step="50" value="${state.planning.bufferMeters}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
           </label>
         ` : `
@@ -131,19 +137,22 @@ function leftPanelComponent() {
           </button>
           ${state.drawingPolygon ? `          <button id="finish-zone" type="button" class="mt-2 w-full rounded-md bg-gendarmerie-blue px-3 py-2 text-xs font-semibold text-white transition hover:bg-gendarmerie-navy disabled:cursor-not-allowed disabled:opacity-50" ${state.polygonPoints.length < 3 ? 'disabled' : ''}>Valider la zone (${state.polygonPoints.length} points)</button>` : ''}
         `}
+        <label class="mt-3 block text-[10px] text-notion-500"> % max de collision
+          <input id="max-collision-input" type="number" min="0" max="100" value="50" class="mt-1 w-full rounded border border-notion-200 px-2 py-1.5 text-xs outline-none focus:border-aeris" />
+        </label>
         </section>
       </details>
       <details open class="group border-t border-notion-200 pt-3">
-        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>3. Placer les drones</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
+        <summary class="flex cursor-pointer list-none items-center justify-between py-1 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span>3. Modifier les TP</span><span class="text-notion-400 transition group-open:rotate-180">⌄</span></summary>
         <section class="pt-2">
         <div class="mb-3 flex items-center justify-between">
-          <span class="text-[10px] text-notion-400">${Number(state.planning.smallDrones) + Number(state.planning.largeDrones)} drones</span>
+          <span class="text-[10px] text-notion-400">${Number(state.planning.smallDrones) + Number(state.planning.largeDrones)} TP</span>
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 1 km
+          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">TP de 1 km
             <input id="small-drones" type="number" min="0" max="30" value="${state.planning.smallDrones}" class="mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
           </label>
-          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">Drones 2 km
+          <label class="rounded-md border border-notion-200 p-2 text-[10px] text-notion-500">TP de 2 km
             <input id="large-drones" type="number" min="0" max="30" value="${state.planning.largeDrones}" class="mt-1 w-full rounded border border-gendarmerie-beige px-2 py-1.5 text-xs outline-none focus:border-gendarmerie-blue" />
           </label>
         </div>
@@ -154,7 +163,7 @@ function leftPanelComponent() {
         <label class="mt-3 block text-[10px] text-gray-500"><span class="flex justify-between"><span>Importance de la zone</span><strong id="area-weight-value" class="font-semibold text-notion-800">${state.planning.areaWeight}</strong></span>
           <input id="area-weight" type="range" min="1" max="100" step="1" value="${state.planning.areaWeight}" class="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-gendarmerie-beige accent-gendarmerie-blue" />
         </label>
-        <p class="mt-1 text-[10px] leading-4 text-gray-500">Une valeur élevée répartit davantage les drones dans toute la zone.</p>
+        <p class="mt-1 text-[10px] leading-4 text-gray-500">Une valeur élevée répartit davantage les TP dans toute la zone.</p>
         <div class="mt-3 grid grid-cols-2 gap-2">
           <button id="optimize-placement" type="button" class="rounded-md bg-gendarmerie-blue px-2 py-2 text-[10px] font-semibold text-white transition hover:bg-gendarmerie-navy disabled:cursor-not-allowed disabled:bg-notion-100 disabled:text-notion-400" ${state.planning.calculating || (!state.planning.gpxGeoJson && !state.polygonAdded) ? 'disabled' : ''}>${state.planning.calculating ? 'Placement en cours…' : 'Calculer le placement'}</button>
         </div>
@@ -182,6 +191,7 @@ function placementResultComponent(hasProtectedArea) {
         <span>Chemin couvert</span><strong class="text-right">${percent(result.stats.path)}</strong>
         <span>Zone couverte</span><strong class="text-right">${percent(result.stats.buffer ?? result.stats.poly)}</strong>
         <span>Zones de chevauchement</span><strong class="text-right">${result.collisions.pairs}</strong>
+        <span>Collision max.</span><strong class="text-right">${result.collisions.percent ?? 0}%</strong>
       </div>
     </div>
   `;
@@ -225,7 +235,7 @@ function mapComponent() {
         <div class="mt-1 text-[10px] text-notion-500">${state.drawingPolygon ? 'Cliquez sur la carte pour ajouter des points' : (state.planning.gpxGeoJson ? 'La carte est centrée sur le chemin' : 'Importez un chemin GPX')}</div>
       </div>
       ${!state.planning.gpxGeoJson && !state.polygonAdded ? `<div class="pointer-events-none absolute left-1/2 top-1/2 z-[1] -translate-x-1/2 -translate-y-1/2 text-center"><div class="rounded-xl border border-notion-200 bg-white/90 px-6 py-5 shadow-panel backdrop-blur"><div class="text-sm font-semibold text-notion-900">Votre mission commence ici</div><div class="mt-1 text-xs text-gray-500">Ajoutez un fichier GPX ou dessinez une zone protégée.</div></div></div>` : ''}
-      <div class="pointer-events-auto absolute bottom-8 right-8 z-[1001] flex items-end gap-2">
+      <div class="pointer-events-auto absolute bottom-8 right-8 z-[1001] flex items-end gap-2 print:hidden">
         ${zoomSettingsComponent()}
         <div class="flex flex-col overflow-hidden rounded-md border border-notion-200 bg-white/90 shadow-panel backdrop-blur">
           <button id="zoom-in" type="button" aria-label="Zoomer" class="grid h-8 w-8 place-items-center border-b border-notion-200 text-lg text-notion-500 hover:bg-notion-100">+</button>

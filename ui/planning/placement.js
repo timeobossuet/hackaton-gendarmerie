@@ -36,6 +36,16 @@ export function calculatePlacement() {
   });
   const result = optimizer.optimize(demand, counts);
   const collisions = renderPlacement(result.pilots, demand.proj);
+
+  // On récupère directement la valeur du champ HTML (50 par défaut si introuvable)
+  const collisionInput = document.getElementById('max-collision-input');
+  const maxAllowed = collisionInput ? parseInt(collisionInput.value, 10) : 50;
+
+  if (collisions.percent > maxAllowed) {
+    clearPlacement(); // Efface la carte
+    throw new Error(`Calcul annulé : le chevauchement est de ${collisions.percent}% (maximum autorisé : ${maxAllowed}%).`);
+  }
+
   state.planning.placement = { ...result, collisions, computedAt: Date.now() };
   return state.planning.placement;
 }
@@ -63,6 +73,7 @@ function renderPlacement(pilots, projection) {
 
   let pairs = 0;
   let collisionArea = 0;
+  let maxOverlapPercent = 0; // Sera mis à jour avec le pire chevauchement
   const circles = placed.map((pilot) => turf.circle(
     [pilot.latLng[1], pilot.latLng[0]],
     pilot.radius / 1000,
@@ -78,7 +89,19 @@ function renderPlacement(pilots, projection) {
       const intersection = turf.intersect(turf.featureCollection([circles[first], circles[second]]));
       if (!intersection) continue;
       pairs += 1;
-      collisionArea += turf.area(intersection);
+      const currentCollisionArea = turf.area(intersection);
+      collisionArea += currentCollisionArea;
+      
+      //Calcul du chevauchement par paire ---
+      const areaFirst = Math.PI * Math.pow(placed[first].radius, 2);
+      const areaSecond = Math.PI * Math.pow(placed[second].radius, 2);
+      const smallestArea = Math.min(areaFirst, areaSecond); 
+      
+      const overlapPercent = (currentCollisionArea / smallestArea) * 100;
+      if (overlapPercent > maxOverlapPercent) {
+        maxOverlapPercent = overlapPercent; 
+      }
+
       L.geoJSON(intersection, {
         style: { color: '#ff1744', weight: 2, fillColor: '#ff1744', fillOpacity: 0.025 },
         interactive: false
@@ -94,5 +117,5 @@ function renderPlacement(pilots, projection) {
       fillOpacity: 1
     }).bindTooltip(`Drone ${pilot.index + 1} · ${pilot.radius / 1000} km`).addTo(placementLayer);
   });
-  return { pairs, collisionArea };
+  return { pairs, collisionArea, percent: Math.round(maxOverlapPercent) };
 }
